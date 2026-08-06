@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Eigene Zeichnung: Sonne, Pfeil und Stecker. Bewusst ohne fremde
+     Wortmarken oder Logos. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="24" fill="#6dac20"/>
+  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round">
+    <circle cx="42" cy="42" r="14" fill="#ffffff" stroke="none"/>
+    <path d="M42 16v8M42 60v8M16 42h8M60 42h8M24 24l6 6M54 54l6 6M60 24l-6 6M30 54l-6 6"/>
+  </g>
+  <path d="M70 30 L54 70 h16 l-8 30 26-44 H72 z" fill="#ffffff"/>
+  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round">
+    <path d="M34 92v10a14 14 0 0 0 14 14h10"/>
+    <path d="M26 84h16M26 100h16"/>
+  </g>
+</svg>

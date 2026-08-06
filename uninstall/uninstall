@@ -1,0 +1,16 @@
+#!/bin/bash
+# Laeuft als ROOT beim Entfernen des Plugins.
+#
+# EVCC wird BEWUSST NICHT mitentfernt. Wer das Plugin deinstalliert, will
+# meistens nur die Loxone-Anbindung los - nicht seine eingerichtete
+# Wallbox-Steuerung samt Datenbank. Das Entfernen steht in der Anleitung.
+echo "<INFO> Entferne die sudo-Regel des Plugins"
+rm -f /etc/sudoers.d/loxberry-evcc
+
+echo "<INFO> EVCC selbst bleibt installiert und laeuft weiter."
+echo "<INFO> Wer es auch entfernen will:"
+echo "<INFO>   sudo systemctl disable --now evcc"
+echo "<INFO>   sudo apt purge evcc"
+echo "<INFO>   sudo rm -f /etc/apt/sources.list.d/evcc-stable.list"
+echo "<INFO> Konfiguration und Datenbank liegen in /etc/evcc.yaml und /var/lib/evcc/."
+exit 0

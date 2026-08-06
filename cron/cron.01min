@@ -1,0 +1,5 @@
+#!/bin/bash
+# Minuetlicher Lauf. Der eigentliche Abruf laeuft feiner - siehe ev_abruf.php:
+# das Skript schleift innerhalb der Minute im eingestellten Takt weiter, damit
+# Loxone nicht bis zu 60 s auf neue Werte wartet.
+REPLACELBPBINDIR/ev_abruf.php cron >/dev/null 2>&1

@@ -1,0 +1,31 @@
+<p>Dieses Plugin verbindet <b>EVCC</b> mit Loxone. EVCC regelt das
+PV-&Uuml;berschussladen herstelleruebergreifend; das Plugin richtet es auf dem
+LoxBerry ein und &uuml;bersetzt seine Werte in die Form, die der Loxone-
+Energiemanager erwartet.</p>
+
+<p><b>Reihenfolge beim Einrichten:</b></p>
+<ol>
+<li>EVCC selbst einrichten &mdash; Wallbox, Z&auml;hler und Fahrzeuge in der
+EVCC-Oberfl&auml;che unter Port 7070. Das Plugin liest nur, was dort
+konfiguriert ist.</li>
+<li>Im Reiter <i>Einstellungen</i> die Adresse pr&uuml;fen und festlegen, wie
+viele Ladepunkte und Fahrzeuge ausgegeben werden sollen.</li>
+<li>Im Reiter <i>MQTT</i> das Abo in das MQTT-Gateway eintragen. Ohne diesen
+Eintrag kommt am Miniserver nichts an.</li>
+<li>Im Reiter <i>Einbindung in Loxone</i> die Vorlage erzeugen und in Loxone
+Config importieren.</li>
+<li>Im Reiter <i>Test</i> die Selbstpr&uuml;fung ansehen.</li>
+</ol>
+
+<p><b>Zu den Vorzeichen:</b> EVCC z&auml;hlt Netzbezug positiv und
+Speicherentladung positiv &mdash; genau wie der Loxone-Energiemanager. Nur die
+Einheit ist eine andere: EVCC rechnet in Watt, der Baustein in Kilowatt. Das
+Plugin rechnet um.</p>
+
+<p><b>Wenn Werte fehlen:</b> Der Reiter <i>Test</i> zeigt, welche Felder sich in
+der Antwort von EVCC finden liessen. Fehlt ein Ger&auml;t &mdash; kein
+Hausspeicher, keine PV-Anlage &mdash;, ist das richtig so. Fehlt etwas, das es
+geben m&uuml;sste, zeigt der Knopf <i>Rohantwort</i> die unver&auml;nderte
+Antwort von EVCC.</p>
+
+<p>Dokumentation zu EVCC: <a href="https://docs.evcc.io/" target="_blank">docs.evcc.io</a></p>
