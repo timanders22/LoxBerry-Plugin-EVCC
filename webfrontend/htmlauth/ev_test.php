@@ -161,7 +161,13 @@ function ev_test_aktion($was)
 
         case 'token':
             $cfg = ev_config();
-            $cfg['aktionstoken'] = ev_token();
+            try {
+                $cfg['aktionstoken'] = ev_token();
+            } catch (RuntimeException $e) {
+                // Kein sicherer Zufall vorhanden. Lieber gar kein Token als
+                // ein erratbares - und das hier auch sagen.
+                return array(0, ev_e($e->getMessage()));
+            }
             if (ev_config_write($cfg)) {
                 ev_log('Zugriffstoken neu erzeugt');
                 return array(1, ev_t('TEST.M_TOKEN_OK'));

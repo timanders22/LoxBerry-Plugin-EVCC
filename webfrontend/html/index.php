@@ -37,6 +37,16 @@ require_once dirname(__DIR__) . '/htmlauth/ev_lib.php';
 function ev_ende($code, $text)
 {
     http_response_code($code);
+    // Die Antwort ist EINE Zeile - Loxone liest sie mit einer
+    // Befehlserkennung. Steht in einem Grund ein Umbruch (curl-Fehlertexte
+    // koennen mehrzeilig sein, ebenso Antworten von EVCC), zerfaellt die
+    // Zeile, und Loxone sieht nur noch den ersten Teil.
+    //
+    // Die mehrzeiligen Ausgaben (json, roh) laufen nicht ueber diese
+    // Funktion, sondern schreiben direkt. Was hier ankommt, ist immer eine
+    // Statuszeile - auch die Liste der erlaubten Aktionen, die dadurch in
+    // einer Zeile steht statt in zweien. Lesbar bleibt sie.
+    $text = str_replace(array("\r\n", "\r", "\n"), ' ', (string) $text);
     echo rtrim($text) . "\n";
     exit;
 }
@@ -232,7 +242,7 @@ switch ($aktion) {
 $a = ev_http($pfad, 'POST');
 if (!$a['ok']) {
     ev_log('Befehl ' . $aktion . ' (' . $klar . ') an ' . $pfad . ' FEHLGESCHLAGEN: ' . $a['fehler']);
-    ev_ende(502, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=' . str_replace(';', ',', $a['fehler']));
+    ev_ende(502, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=' . str_replace(';', ',', (string) $a['fehler']));
 }
 ev_log('Befehl ' . $aktion . ' (' . $klar . ') an Ladepunkt ' . $lp . ' gesendet');
 // Der zwischengespeicherte Zustand ist jetzt veraltet.

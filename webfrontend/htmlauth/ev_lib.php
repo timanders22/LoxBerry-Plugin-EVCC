@@ -107,14 +107,33 @@ function ev_log($text)
 }
 
 /** Nur protokollieren, wenn sich der Text geaendert hat. */
+/**
+ * Dieselbe Meldung nur einmal ins Protokoll.
+ *
+ * Der Merker liegt jetzt ZUERST im Arbeitsspeicher. ev_abruf.php schleift
+ * innerhalb einer Minute bis zu zwoelfmal durch; bis 0.9.0 wurde dabei jedes
+ * Mal eine Datei gelesen und - bei einer Dauerstoerung - nie geschrieben.
+ * Das ist kein Beinbruch (/tmp liegt im Arbeitsspeicher), aber es ist Arbeit
+ * ohne Ertrag.
+ *
+ * Die Datei bleibt trotzdem: der Cron startet jede Minute einen NEUEN
+ * Prozess, und ohne die Datei stuende dieselbe Dauerstoerung dann jede
+ * Minute erneut im Protokoll.
+ */
 function ev_log_wenn_neu($schluessel, $text)
 {
-    $f = ev_tmpdir() . '/letzte_' . preg_replace('/[^a-z0-9_]/', '', $schluessel) . '.txt';
-    $vorher = is_file($f) ? (string) file_get_contents($f) : '';
-    if ($text !== $vorher) {
-        ev_log($schluessel . ': ' . $text);
-        @file_put_contents($f, $text);
+    static $merker = array();
+    $schluessel = preg_replace('/[^a-z0-9_]/', '', $schluessel);
+    if (array_key_exists($schluessel, $merker)) {
+        if ($merker[$schluessel] === $text) { return; }
+    } else {
+        $f = ev_tmpdir() . '/letzte_' . $schluessel . '.txt';
+        $merker[$schluessel] = is_file($f) ? (string) file_get_contents($f) : '';
+        if ($merker[$schluessel] === $text) { return; }
     }
+    $merker[$schluessel] = $text;
+    ev_log($schluessel . ': ' . $text);
+    @file_put_contents(ev_tmpdir() . '/letzte_' . $schluessel . '.txt', $text);
 }
 
 function ev_e($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); }
@@ -172,9 +191,35 @@ function ev_config()
     if ($cfg['mqtt_topic'] === '') { $cfg['mqtt_topic'] = 'evcc2lox'; }
 
     // Token beim ersten Mal selbst erzeugen und gleich sichern.
+    //
+    // Mit Sperre. Beim ersten Aufruf nach der Einrichtung koennen die
+    // Oberflaeche, der Cron-Abruf und der Miniserver-Endpunkt gleichzeitig
+    // hier ankommen. Ohne Sperre erzeugt jeder ein eigenes Token und
+    // ueberschreibt die anderen - wer sich das Token vorher aus der
+    // Oberflaeche abgeschrieben hat, haelt danach ein ungueltiges in der Hand.
     if (!preg_match('/^[A-Za-z0-9]{24,}$/', (string) $cfg['aktionstoken'])) {
-        $cfg['aktionstoken'] = ev_token();
-        ev_config_write($cfg);
+        $sperre = @fopen($p['configdir'] . '/.token.lock', 'c');
+        if ($sperre !== false && flock($sperre, LOCK_EX)) {
+            // Innerhalb der Sperre noch einmal nachsehen: vielleicht war ein
+            // anderer Prozess schneller, dann wird seines uebernommen.
+            $frisch = @json_decode((string) @file_get_contents($p['config']), true);
+            if (is_array($frisch)
+                && preg_match('/^[A-Za-z0-9]{24,}$/', (string) (isset($frisch['aktionstoken']) ? $frisch['aktionstoken'] : ''))) {
+                $cfg['aktionstoken'] = $frisch['aktionstoken'];
+            } else {
+                try {
+                    $cfg['aktionstoken'] = ev_token();
+                    ev_config_write($cfg);
+                } catch (RuntimeException $e) {
+                    // ev_token bricht ab, wenn das System keinen sicheren
+                    // Zufall hat. Dann bleibt das Token leer - der Endpunkt
+                    // weist jede Anfrage ab, und im Reiter Test steht warum.
+                    $cfg['aktionstoken'] = '';
+                }
+            }
+            flock($sperre, LOCK_UN);
+        }
+        if ($sperre !== false) { fclose($sperre); }
     }
     return $cfg;
 }
@@ -196,16 +241,38 @@ function ev_config_write($cfg)
 
 /** Zufaelliges Token. random_bytes, nicht rand() - das Token schuetzt einen
  *  Endpunkt, der ohne Anmeldung erreichbar ist. */
+/**
+ * Ein Token fuer den unangemeldeten Endpunkt.
+ *
+ * KEIN Rueckfall auf mt_rand. Bis 0.9.0 stand hier einer - und er war
+ * gefaehrlicher als gar keiner: mt_rand ist ein Mersenne-Twister, kein
+ * Zufallsgenerator fuer Sicherheitszwecke. Wer ein paar Ausgaben kennt, kann
+ * den inneren Zustand bestimmen und alle weiteren vorhersagen. Dieses Token
+ * ist das EINZIGE, was den schaltenden Endpunkt schuetzt.
+ *
+ * random_bytes wirft nur, wenn das Betriebssystem keine Zufallsquelle
+ * anbietet. Dann ist etwas grundlegend nicht in Ordnung, und ein erratbares
+ * Token waere die falsche Antwort darauf. Also wird abgebrochen und gesagt,
+ * warum.
+ *
+ * Nebenbei: der Modulo auf 62 Zeichen verteilt nicht ganz gleichmaessig
+ * (256 ist kein Vielfaches von 62). Bei 32 Zeichen aus 62 bleiben auch mit
+ * dieser Schiefe rund 190 Bit - das genuegt bei weitem. Erwaehnt sei es
+ * trotzdem, damit niemand die Stelle spaeter fuer bewiesen haelt.
+ */
 function ev_token($laenge = 32)
 {
     $zeichen = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    $out = '';
     try {
         $roh = random_bytes($laenge);
     } catch (Exception $e) {
-        $roh = '';
-        for ($i = 0; $i < $laenge; $i++) { $roh .= chr(mt_rand(0, 255)); }
+        ev_log('FEHLER: das Betriebssystem liefert keinen sicheren Zufall ('
+             . $e->getMessage() . '). Es wird KEIN Token erzeugt - ein '
+             . 'erratbares waere schlimmer als keines.');
+        throw new RuntimeException(
+            'Kein sicherer Zufall verfuegbar - es wurde kein Token erzeugt.');
     }
+    $out = '';
     for ($i = 0; $i < $laenge; $i++) {
         $out .= $zeichen[ord($roh[$i]) % strlen($zeichen)];
     }
@@ -295,15 +362,41 @@ function ev_state($force = false)
         $st['fehler'] = $a['fehler'];
         ev_log_wenn_neu('abruf', 'FEHLGESCHLAGEN: ' . $a['fehler']);
         // Letzten guten Stand behalten, damit ein kurzer Aussetzer nicht
-        // alle Werte in Loxone auf null zieht.
+        // alle Werte in Loxone auf null zieht - aber den Fehler MITSCHREIBEN.
+        //
+        // Bis 0.9.0 wurde der entwertete Stand nur zurueckgegeben, nicht in
+        // den Zwischenspeicher geschrieben. Die Datei behielt damit auf Dauer
+        // 'ok' => 1, und das hat drei Folgen:
+        //
+        //   1. Wer die Datei unmittelbar liest - ev_fahrzeugnamen() tut das -
+        //      sieht bis in alle Ewigkeit einen Zustand, der als gut markiert
+        //      ist.
+        //   2. Der Zeitstempel der Datei blieb alt. Der Miniserver-Endpunkt
+        //      hielt den Zwischenspeicher deshalb bei JEDEM Abruf fuer
+        //      veraltet und stellte selbst eine HTTP-Anfrage. Bei
+        //      abgeschaltetem EVCC laeuft die in die Zeitgrenze - und die
+        //      Loxone-Abfrage haengt jedes Mal mehrere Sekunden.
+        //   3. 'stand' blieb der alte, was richtig ist: das Alter soll ja
+        //      wachsen. Das bleibt so.
+        //
+        // Geschrieben wird deshalb jetzt der ENTWERTETE Stand: alte Werte,
+        // alter Zeitstempel, aber ok = 0 und der Fehlertext. Ein Leser sieht
+        // damit dasselbe, egal ob er ueber ev_state() geht oder die Datei
+        // aufmacht.
         if (is_file($cache)) {
             $c = json_decode((string) file_get_contents($cache), true);
             if (is_array($c) && !empty($c['roh'])) {
                 $c['ok'] = 0;
                 $c['fehler'] = $a['fehler'];
+                // 'stand' NICHT anfassen - daraus rechnet der Endpunkt das
+                // Alter, und das soll wachsen.
+                @file_put_contents($cache, json_encode($c));
                 return $c;
             }
         }
+        // Es gibt gar keinen alten Stand. Auch das gehoert festgehalten,
+        // sonst fragt jeder Aufruf erneut und laeuft erneut in die Zeitgrenze.
+        @file_put_contents($cache, json_encode($st));
         return $st;
     }
     $d = json_decode($a['body'], true);
@@ -695,6 +788,12 @@ function ev_mqtt_zustand()
     $gen = @json_decode((string) @file_get_contents($p['home'] . '/config/system/general.json'), true);
     if (!is_array($gen)) { return $out; }
     foreach (array('Mqtt', 'mqtt') as $k) {
+        // is_array reicht hier wirklich: PHP 8 wuerde bei $gen[$k][$pk] auf
+        // einer Zeichenkette zwar keinen fatalen Fehler werfen (es liest den
+        // Buchstaben an dieser Stelle, und isset() ist bei einem nicht
+        // numerischen Schluessel false), aber das Ergebnis waere Unsinn.
+        // Die Pruefung stand schon da und bleibt - hier nur der Vollstaendig-
+        // keit halber benannt, weil sie beim Lesen leicht zu uebersehen ist.
         if (!isset($gen[$k]) || !is_array($gen[$k])) { continue; }
         $out['gefunden'] = 1;
         foreach (array('Udpinport', 'udpinport') as $pk) {
@@ -718,15 +817,56 @@ function ev_mqtt_publish($werte = null)
     }
     if ($werte === null) { $werte = ev_werte(); }
     $s = @socket_create(AF_INET, SOCK_DGRAM, SOL_UDP);
-    if (!$s) { return 0; }
+    if (!$s) {
+        ev_log_wenn_neu('mqtt', 'UDP-Socket liess sich nicht anlegen - ist die '
+            . 'PHP-Erweiterung sockets vorhanden?');
+        return 0;
+    }
     $n = 0;
     foreach ($werte as $name => $d) {
-        $msg = 'publish ' . $cfg['mqtt_topic'] . '/' . $name . ' ' . $d['wert'];
-        @socket_sendto($s, $msg, strlen($msg), 0, '127.0.0.1', $z['udpport']);
-        $n++;
+        $msg = 'publish ' . ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $name)
+             . ' ' . ev_mqtt_nutzlast($d['wert']);
+        $ok = @socket_sendto($s, $msg, strlen($msg), 0, '127.0.0.1', $z['udpport']);
+        if ($ok !== false) { $n++; }
     }
     socket_close($s);
     return $n;
+}
+
+/**
+ * Ein Thema fuer das MQTT-Gateway.
+ *
+ * Das Gateway liest eine UDP-Zeile als drei Teile: Verb, Thema, Rest. Getrennt
+ * wird an Leerzeichen - ein Leerzeichen IM Thema verschiebt deshalb alles
+ * dahinter. Ausserdem beendet ein Zeilenumbruch die Nachricht.
+ *
+ * mqtt_topic ist zwar schon in ev_config() gefiltert, aber $name kommt aus
+ * ev_felder() und koennte durch eine Erweiterung spaeter anders aussehen.
+ * Deshalb wird hier noch einmal gefiltert - an der Stelle, wo es zaehlt.
+ */
+function ev_mqtt_thema($thema)
+{
+    $t = preg_replace('#[^A-Za-z0-9_/\-]#', '_', (string) $thema);
+    $t = preg_replace('#/+#', '/', $t);
+    return trim($t, '/');
+}
+
+/**
+ * Eine Nutzlast fuer das MQTT-Gateway.
+ *
+ * Zeilenumbrueche muessen weg: das Gateway liest zeilenweise, ein \n mitten
+ * in der Nutzlast macht aus einer Nachricht zwei - die zweite beginnt dann
+ * nicht mit 'publish' und wird verworfen, aber der Rest des Wertes ist futsch.
+ *
+ * Hier stehen zwar nur Zahlen drin. Aber genau darauf hat sich das Plugin
+ * schon einmal verlassen, und ein spaeter ergaenztes Textfeld (Fahrzeugname,
+ * Fehlermeldung) faellt sonst niemandem auf, bis es kaputtgeht.
+ */
+function ev_mqtt_nutzlast($wert)
+{
+    $w = str_replace(array("\r\n", "\r", "\n", "\t"), ' ', (string) $wert);
+    $w = preg_replace('/\s+/', ' ', $w);
+    return trim($w);
 }
 
 /* ==================================================================

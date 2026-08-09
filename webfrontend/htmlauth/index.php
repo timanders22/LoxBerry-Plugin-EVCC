@@ -429,6 +429,58 @@ $ev_stand = ev_state();
 </div>
 <?php } ?>
 
+<h2><?= ev_e(ev_t('SPOT.H')) ?></h2>
+<div class="sm-hinweis"><?= ev_t('SPOT.EINLEITUNG') ?></div>
+<?php if (empty($ev_cfg['tarife_ein'])) { ?>
+<div class="sm-hilfe"><?= ev_t('SPOT.GESPERRT') ?></div>
+<?php } else { ?>
+<div class="sm-step"><b><?= ev_e(ev_t('SPOT.H_WERTE')) ?></b><br>
+<?= ev_t('SPOT.WERTE_TEXT') ?>
+<table class="sm-tbl">
+<tr><th><?= ev_e(ev_t('LOX.T_VONHIER')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th></tr>
+<tr><td><span class="sm-mono">EVCC_TARIF_NETZ</span></td><td><?= ev_t('SPOT.Z_NETZ') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_TARIF_EINSPEISUNG</span></td><td><?= ev_t('SPOT.Z_EINSPEISUNG') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_TARIF_CO2</span></td><td><?= ev_t('SPOT.Z_CO2') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_LP1_SMARTCOST_AKTIV</span></td><td><?= ev_t('SPOT.Z_AKTIV') ?></td></tr>
+</table>
+</div>
+
+<div class="sm-step"><b><?= ev_e(ev_t('SPOT.H_GRENZE')) ?></b><br>
+<?= ev_t('SPOT.GRENZE_TEXT') ?>
+<?php if (!empty($ev_cfg['steuerung_ein'])) { ?>
+<div class="sm-pre"><?= ev_e(ev_endpunkt('smartcostlimit')) ?>&amp;lp=1&amp;wert=&lt;v.3&gt;</div>
+<?= ev_t('SPOT.GRENZE_EINHEIT') ?>
+<?php } else { ?>
+<div class="sm-hilfe"><?= ev_t('SPOT.GRENZE_GESPERRT') ?></div>
+<?php } ?>
+</div>
+
+<div class="sm-step"><b><?= ev_e(ev_t('SPOT.H_REZEPT')) ?></b><br>
+<?= ev_t('SPOT.REZEPT') ?>
+<div class="sm-warnung"><?= ev_t('SPOT.WARNUNG') ?></div>
+</div>
+<?php } ?>
+
+<h2><?= ev_e(ev_t('DIREKT.H')) ?></h2>
+<div class="sm-hinweis"><?= ev_t('DIREKT.EINLEITUNG') ?></div>
+<div class="sm-step"><b><?= ev_e(ev_t('DIREKT.H_BEDINGUNG')) ?></b><br>
+<?php if ((string) $ev_cfg['passwort'] !== '') { ?>
+<div class="sm-warnung"><?= ev_t('DIREKT.PASSWORT_GESETZT') ?></div>
+<?php } else { ?>
+<div class="sm-hilfe"><?= ev_t('DIREKT.PASSWORT_LEER') ?></div>
+<table class="sm-tbl">
+<tr><th><?= ev_e(ev_t('LOX.T_BEFEHL')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th></tr>
+<tr><td><span class="sm-mono"><?= ev_e($ev_cfg['url']) ?>/api/loadpoints/1/mode/pv</span></td><td><?= ev_t('DIREKT.Z_MODUS') ?></td></tr>
+<tr><td><span class="sm-mono"><?= ev_e($ev_cfg['url']) ?>/api/loadpoints/1/limitsoc/&lt;v.0&gt;</span></td><td><?= ev_t('DIREKT.Z_LIMITSOC') ?></td></tr>
+<tr><td><span class="sm-mono"><?= ev_e($ev_cfg['url']) ?>/api/batterymode/hold</span></td><td><?= ev_t('DIREKT.Z_BATTERIE') ?></td></tr>
+</table>
+<?= ev_t('DIREKT.METHODE') ?>
+<?php } ?>
+</div>
+<div class="sm-step"><b><?= ev_e(ev_t('DIREKT.H_ABWAEGUNG')) ?></b><br>
+<?= ev_t('DIREKT.ABWAEGUNG') ?>
+</div>
+
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S4_T')) ?></b><br>
 <?= ev_t('LOX.S4') ?>
 <table class="sm-tbl">

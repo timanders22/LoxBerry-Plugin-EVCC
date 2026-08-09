@@ -1,15 +1,66 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Eigene Zeichnung: Sonne, Pfeil und Stecker. Bewusst ohne fremde
-     Wortmarken oder Logos. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <rect width="128" height="128" rx="24" fill="#6dac20"/>
-  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round">
-    <circle cx="42" cy="42" r="14" fill="#ffffff" stroke="none"/>
-    <path d="M42 16v8M42 60v8M16 42h8M60 42h8M24 24l6 6M54 54l6 6M60 24l-6 6M30 54l-6 6"/>
+<svg width="512" height="512" viewBox="0 0 512 512" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg-grad" cx="50%" cy="50%" r="50%" fx="35%" fy="35%">
+      <stop offset="0%" stop-color="#7dc424" />
+      <stop offset="65%" stop-color="#6dac20" />
+      <stop offset="100%" stop-color="#568819" />
+    </radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Outer Badge Ring -->
+  <circle cx="256" cy="256" r="246" fill="url(#bg-grad)" />
+  <circle cx="256" cy="256" r="232" fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="3" />
+
+  <g filter="url(#shadow)" fill="#ffffff">
+    <!-- EV Charging Wallbox Main Body -->
+    <rect x="196" y="85" width="120" height="175" rx="18" fill="#ffffff" />
+
+    <!-- Screen Cutout -->
+    <rect x="216" y="105" width="80" height="60" rx="8" fill="#6dac20" />
+
+    <!-- Lightning Bolt inside Screen -->
+    <polygon points="262,111 240,138 253,138 244,159 272,130 256,130" fill="#ffffff" />
+
+    <!-- Type 2 Plug Socket Circle in Wallbox -->
+    <circle cx="256" cy="205" r="20" fill="#6dac20" />
+    <!-- Type 2 Pin holes -->
+    <circle cx="256" cy="195" r="3" fill="#ffffff" />
+    <circle cx="247" cy="200" r="3" fill="#ffffff" />
+    <circle cx="265" cy="200" r="3" fill="#ffffff" />
+    <circle cx="247" cy="210" r="3" fill="#ffffff" />
+    <circle cx="265" cy="210" r="3" fill="#ffffff" />
+    <circle cx="252" cy="216" r="2.5" fill="#ffffff" />
+    <circle cx="260" cy="216" r="2.5" fill="#ffffff" />
+
+    <!-- Charging Cable loop underneath -->
+    <path d="M 236 205 C 200 205 200 270 256 270 C 312 270 312 205 276 205" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
+
+    <!-- Flanking Left Symbol: Solar Panel / PV Surplus Power -->
+    <g transform="translate(126, 165)">
+      <circle cx="0" cy="0" r="22" fill="#ffffff" />
+      <polygon points="-12,8 -6,-10 6,-10 12,8" fill="#6dac20" />
+      <line x1="0" y1="-10" x2="0" y2="8" stroke="#ffffff" stroke-width="2" />
+      <line x1="-9" y1="-1" x2="9" y2="-1" stroke="#ffffff" stroke-width="2" />
+    </g>
+
+    <!-- Flanking Right Symbol: Electric Vehicle (EV Car) -->
+    <g transform="translate(386, 165)">
+      <circle cx="0" cy="0" r="22" fill="#ffffff" />
+      <path d="M -12 4 L -10 -2 L -5 -8 L 5 -8 L 10 -2 L 12 4 Z" fill="#6dac20" />
+      <rect x="-13" y="2" width="26" height="6" rx="2" fill="#6dac20" />
+      <circle cx="-7" cy="8" r="3" fill="#6dac20" />
+      <circle cx="7" cy="8" r="3" fill="#6dac20" />
+    </g>
+
+    <!-- Dashed Line -->
+    <path d="M 150 345 L 362 345" stroke="#ffffff" stroke-width="4" stroke-dasharray="6 8" opacity="0.8" />
   </g>
-  <path d="M70 30 L54 70 h16 l-8 30 26-44 H72 z" fill="#ffffff"/>
-  <g fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round">
-    <path d="M34 92v10a14 14 0 0 0 14 14h10"/>
-    <path d="M26 84h16M26 100h16"/>
-  </g>
+
+  <!-- Typography -->
+  <text x="256" y="388" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="900" font-size="29" letter-spacing="1">EVCC</text>
+  <text x="256" y="424" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-weight="bold" font-size="20" letter-spacing="3">LOXBERRY</text>
 </svg>

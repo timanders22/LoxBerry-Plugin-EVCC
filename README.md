@@ -68,12 +68,28 @@ Zugangsdaten erreicht, und ist durch ein Token geschützt. Verglichen wird mit
 `hash_equals`. Unbekannte Aktionen und Werte außerhalb des erlaubten Bereichs
 werden abgewiesen, nicht zurechtgebogen.
 
+## Laden nach Strompreis
+
+Ist in EVCC ein Spottarif hinterlegt (Tibber, aWATTar, Octopus, EPEX Spot),
+reicht das Plugin drei Werte durch: den aktuellen Arbeitspreis, die
+Einspeisevergütung und den CO₂-Anteil — dazu je Ladepunkt die Meldung, ob
+gerade *wegen des günstigen Preises* geladen wird. Die Preisgrenze
+(`smartCostLimit`) lässt sich aus Loxone setzen.
+
+Die Entscheidung trifft **EVCC**. In Loxone eine zweite Preisautomatik zu
+bauen, führt dazu, dass beide gegeneinander schalten; im Reiter *Loxone* steht,
+warum und was stattdessen sinnvoll ist.
+
 ## Was beim Entfernen passiert
 
 Das Plugin entfernt **EVCC nicht mit**. Wer das Plugin deinstalliert, will
 meistens nur die Loxone-Anbindung los — nicht seine eingerichtete
 Wallbox-Steuerung samt Datenbank. Das Entfernen von EVCC steht im
 Deinstallationsprotokoll.
+
+Was **sehr wohl** mitgeht, sind Konfiguration und Daten des Plugins. In
+`evcc.json` steht das EVCC-Passwort im Klartext und das Token des
+unangemeldeten Endpunkts; beides bleibt nach dem Entfernen nicht liegen.
 
 ## Bekannte Unschärfe
 
@@ -89,3 +105,39 @@ unveränderte Antwort von EVCC; die Zuordnung ist dann eine Zeile in
 
 Apache 2.0. EVCC selbst steht unter MIT und wird nicht mitgeliefert, sondern
 aus der offiziellen Paketquelle installiert.
+
+## Änderungen
+
+### 0.9.1
+
+- **Zustand nach einem Ausfall.** Schlug der Abruf fehl, gab das Plugin den
+  letzten guten Stand mit `ok=0` zurück, schrieb das aber nicht in den
+  Zwischenspeicher. Die Datei behielt `ok=1`, und weil ihr Zeitstempel
+  stehenblieb, galt sie bei jedem Loxone-Abruf als veraltet — jede Abfrage
+  stellte eine eigene HTTP-Anfrage und lief in die Zeitgrenze. Gemessen an
+  einem Takt von 10 s und sekündlicher Abfrage: 57 Versuche je Minute vorher,
+  12 nachher. Das Alter (`ALTER_S`) wächst weiter wie bisher.
+- **Token.** Der Rückfall auf `mt_rand` ist entfallen. Er war gefährlicher als
+  gar keiner: aus wenigen Ausgaben eines Mersenne-Twisters lässt sich der
+  innere Zustand bestimmen, und dieses Token schützt den einzigen schaltenden
+  Endpunkt. Fehlt sichere Zufälligkeit, wird abgebrochen und gesagt, warum.
+  Die erste Erzeugung läuft jetzt unter einer Sperre.
+- **Sicherung beim Update** liegt nicht mehr unter `/tmp` (auf dem LoxBerry
+  eine Ramdisk), sondern unter `data/plugins/`. Ein Neustart zwischen den
+  beiden Update-Schritten hätte sonst die Zugangsdaten mitgenommen.
+- **Deinstallation** entfernt Konfiguration und Daten mit — bis 0.9.0 blieb das
+  Passwort im Klartext liegen.
+- **MQTT.** Thema und Nutzlast werden vor dem Senden gesäubert. Das Gateway
+  liest zeilenweise und trennt an Leerzeichen; ein Umbruch oder ein Leerzeichen
+  im Thema hätte die Nachricht zerteilt. Fehlgeschlagene Sendungen zählen nicht
+  mehr als erfolgreich.
+- **Sperrdatei.** Ließ sie sich nicht öffnen, endete der zeitgesteuerte Abruf
+  ohne einen Eintrag im Protokoll. Jetzt steht dort, was zu prüfen ist.
+- **Kleinigkeiten.** `str_replace` bekommt seinen Wert als Zeichenkette
+  (unter PHP 8.1 sonst eine Verwarnung, ab 9 ein Fehler); wiederholte Meldungen
+  werden im Arbeitsspeicher gemerkt statt bei jedem Durchlauf aus einer Datei
+  gelesen; `jq` und `mosquitto-clients` sind aus den Paketabhängigkeiten
+  entfernt, weil sie nirgends benutzt wurden.
+- **Neu im Reiter Loxone:** ein Abschnitt zum Laden nach Strompreis und einer
+  zur Rückfallebene, in der Loxone EVCC ohne dieses Plugin anspricht — samt der
+  Bedingung, unter der das überhaupt geht.

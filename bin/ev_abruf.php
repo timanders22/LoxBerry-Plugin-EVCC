@@ -69,7 +69,17 @@ if ($modus !== 'cron') {
 // EVCC-Antwort die Durchlaeufe, bis nichts mehr geht.
 $sperre = ev_tmpdir() . '/abruf.lock';
 $fh = @fopen($sperre, 'c');
-if ($fh === false) { exit(1); }
+if ($fh === false) {
+    // Bis 0.9.0 endete der Lauf hier ohne ein Wort. Der Cron laeuft weiter,
+    // im Protokoll steht nichts, und die Werte in Loxone stehen still - ohne
+    // dass irgendwo ablesbar waere, warum. Typische Ursache: /tmp ist voll
+    // oder die Datei gehoert nach einem Handgriff als root nicht mehr
+    // loxberry.
+    ev_log_wenn_neu('sperre', 'Sperrdatei ' . $sperre . ' laesst sich nicht '
+        . 'oeffnen - der zeitgesteuerte Abruf laeuft NICHT. Pruefen: '
+        . 'Platz im Verzeichnis und Eigentuemer der Datei (loxberry).');
+    exit(1);
+}
 if (!flock($fh, LOCK_EX | LOCK_NB)) {
     // Ein Lauf ist noch unterwegs - das ist kein Fehler, nur ein Hinweis.
     exit(0);

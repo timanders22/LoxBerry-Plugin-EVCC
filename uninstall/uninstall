@@ -4,8 +4,32 @@
 # EVCC wird BEWUSST NICHT mitentfernt. Wer das Plugin deinstalliert, will
 # meistens nur die Loxone-Anbindung los - nicht seine eingerichtete
 # Wallbox-Steuerung samt Datenbank. Das Entfernen steht in der Anleitung.
+ARGV1=$1   # Plugin-Verzeichnisname
+
 echo "<INFO> Entferne die sudo-Regel des Plugins"
 rm -f /etc/sudoers.d/loxberry-evcc
+
+# Konfiguration mit entfernen.
+#
+# In evcc.json steht das EVCC-Passwort IM KLARTEXT, dazu das Zugriffstoken
+# des unangemeldeten Miniserver-Endpunkts. Bis 0.9.0 blieb die Datei nach
+# der Deinstallation liegen - mitsamt beidem, und ohne dass irgendwo stand,
+# dass sie noch da ist. Wer ein Plugin entfernt, geht davon aus, dass seine
+# Zugangsdaten mitgehen.
+#
+# LoxBerry raeumt config/ und data/ beim Entfernen normalerweise selbst auf.
+# Verlassen wird sich darauf hier NICHT: der Aufwand ist ein rm, und der
+# Schaden im Fehlerfall ist ein Passwort auf der Platte.
+LBHOME=${LBHOMEDIR:-/opt/loxberry}
+PDIR=${ARGV1:-evcc}
+for verzeichnis in "$LBHOME/config/plugins/$PDIR" "$LBHOME/data/plugins/$PDIR"; do
+    if [ -d "$verzeichnis" ]; then
+        rm -rf "$verzeichnis"
+        echo "<OK> $verzeichnis entfernt."
+    fi
+done
+rm -rf "/tmp/${PDIR}_upgrade" "/run/shm/${PDIR}" 2>/dev/null
+echo "<INFO> Zugangsdaten und Zugriffstoken des Plugins sind geloescht."
 
 echo "<INFO> EVCC selbst bleibt installiert und laeuft weiter."
 echo "<INFO> Wer es auch entfernen will:"
