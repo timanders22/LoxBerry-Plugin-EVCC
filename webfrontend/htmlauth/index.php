@@ -312,8 +312,11 @@ $ev_stand = ev_state();
   <div class="sm-hilfe"><?= ev_t('EINST.H_MQTT_TOPIC') ?></div>
 </div>
 
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span>
+</div>
 <div class="sm-knopfreihe">
-  <button data-role="none" class="sm-btn sm-b-lesen" type="submit"><?= ev_e(ev_t('ALLG.SPEICHERN')) ?></button>
+  <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('ALLG.SPEICHERN')) ?></button>
 </div>
 </form>
 </div>
