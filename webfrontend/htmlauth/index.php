@@ -300,6 +300,7 @@ $ev_stand = ev_state();
 </div>
 
 <h2><?= ev_e(ev_t('EINST.H_MQTT')) ?></h2>
+<?php if (!function_exists('ev_hs_autostart')) { function ev_hs_autostart() { $h = getenv('LBHOMEDIR') ?: '/opt/loxberry'; $g = $h . '/config/system/general.json'; if (!is_file($g)) { return null; } $j = json_decode((string) @file_get_contents($g), true); if (!is_array($j) || !isset($j['Mqtt'])) { return null; } return !empty($j['Mqtt']['Gatewayautostart']); } } if (ev_hs_autostart() === false) { ?><div class="sm-alert sm-warn"><b>MQTT:</b> <?php echo ev_t('EINST.W_AUTOSTART'); ?></div><?php } ?>
 <div class="sm-feld">
   <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;">
     <input data-role="none" type="checkbox" name="mqtt_ein" value="1" <?= !empty($ev_cfg['mqtt_ein']) ? 'checked' : '' ?>>
