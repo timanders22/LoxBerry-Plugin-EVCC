@@ -89,7 +89,16 @@ function ev_paths()
             'home'      => $home,
             'plugin'    => $plugin,
             'config'    => $home . '/config/plugins/' . $plugin . '/evcc.json',
-            'sicherung' => $home . '/config/plugins/' . $plugin . '/evcc.backup.json',
+            /* Die Zweitschrift liegt NEBEN dem Plugin-Ordner, nicht darin.
+             * LoxBerry entfernt config/plugins/<ordner>/ bei Deinstallation
+             * und Neuinstallation - eine Sicherung im Ordner stirbt also
+             * genau in dem Fall mit, fuer den es sie gibt. So halten es auch
+             * Weissware, Kodi und die uebrigen 18 Linien mit Zweitschrift.
+             * 'sicherung_alt' ist der frueher benutzte Ort; er wird beim
+             * Heilen weiter gelesen, damit bestehende Anlagen ihre
+             * vorhandene Sicherung nicht verlieren. */
+            'sicherung' => $home . '/config/plugins/' . $plugin . '.backup.evcc.json',
+            'sicherung_alt' => $home . '/config/plugins/' . $plugin . '/evcc.backup.json',
             'configdir' => $home . '/config/plugins/' . $plugin,
             'data'      => $home . '/data/plugins/' . $plugin,
             'log'       => $home . '/log/plugins/' . $plugin . '/evcc.log',
@@ -101,6 +110,7 @@ function ev_paths()
         'home' => '', 'plugin' => 'evcc',
         'config' => $eigen . '/config/evcc.json',
         'sicherung' => $eigen . '/config/evcc.backup.json',
+        'sicherung_alt' => $eigen . '/config/evcc.backup.json',
         'configdir' => $eigen . '/config',
         'data' => sys_get_temp_dir() . '/evcc',
         'log' => sys_get_temp_dir() . '/evcc/evcc.log',
@@ -195,11 +205,19 @@ function ev_vorgaben()
 function ev_config()
 {
     $p = ev_paths();
-    // Selbstheilung: leere oder fehlende Konfiguration aus der Sicherung holen.
+    /* Selbstheilung: leere oder fehlende Konfiguration aus der Sicherung
+     * holen. Zuerst am heutigen Ort (neben dem Plugin-Ordner), dann am
+     * frueheren Ort darin - sonst verloere eine bestehende Anlage beim
+     * Update ihre vorhandene Sicherung. */
     $roh = is_file($p['config']) ? trim((string) @file_get_contents($p['config'])) : '';
-    if (($roh === '' || $roh === '{}') && is_file($p['sicherung'])) {
-        @mkdir($p['configdir'], 0775, true);
-        @copy($p['sicherung'], $p['config']);
+    if ($roh === '' || $roh === '{}') {
+        foreach (array($p['sicherung'], $p['sicherung_alt']) as $ev_quelle) {
+            if ($ev_quelle !== '' && is_file($ev_quelle)) {
+                @mkdir($p['configdir'], 0775, true);
+                @copy($ev_quelle, $p['config']);
+                break;
+            }
+        }
     }
     $cfg = array();
     if (is_file($p['config'])) {

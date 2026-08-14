@@ -99,14 +99,11 @@ if ($ev_post && isset($_POST['speichern'])) {
         $ev_cfg['fahrzeuge'] = $ev_fz;
     }
 
-    $ev_topic = preg_replace('#[^A-Za-z0-9_/\-]#', '', (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : ''));
-    if ($ev_topic === '') {
-        $ev_fehler[] = ev_t('EINST.FEHLER_TOPIC');
-    } else {
-        $ev_cfg['mqtt_topic'] = trim($ev_topic, '/');
-    }
+    /* mqtt_ein und mqtt_topic werden hier NICHT mehr angefasst: sie
+     * wohnen im Reiter MQTT und haben dort ein eigenes Formular. Die
+     * Konfiguration kommt aus ev_config(), die Werte ueberleben also
+     * unveraendert. */
 
-    $ev_cfg['mqtt_ein'] = isset($_POST['mqtt_ein']) ? 1 : 0;
     $ev_cfg['tarife_ein'] = isset($_POST['tarife_ein']) ? 1 : 0;
     $ev_cfg['steuerung_ein'] = isset($_POST['steuerung_ein']) ? 1 : 0;
 
@@ -119,6 +116,30 @@ if ($ev_post && isset($_POST['speichern'])) {
         }
     }
     $ev_tab = 'tab-settings';
+}
+
+/* ---------------- MQTT (eigener Reiter, eigenes Formular) ----------------
+ *
+ * Eigenes Formular UND eigener Handler gehoeren zusammen. Loesten beide
+ * Formulare denselben Handler aus, setzte dieser die Haken des jeweils
+ * nicht abgeschickten Formulars per isset() auf 0 - der Benutzer verloere
+ * Werte, die er nie gesehen hat. */
+if ($ev_post && isset($_POST['save_mqtt'])) {
+    $ev_mcfg = ev_config();
+    $ev_mcfg['mqtt_ein'] = isset($_POST['mqtt_ein']) ? 1 : 0;
+    $ev_mtopic = trim(preg_replace('/[\x00-\x1F\x7F"\']/', '',
+        (string) (isset($_POST['mqtt_topic']) ? $_POST['mqtt_topic'] : '')));
+    if ($ev_mtopic === '' || !preg_match('#^[A-Za-z0-9_/\-]{1,64}$#', $ev_mtopic)) {
+        $ev_fehler[] = ev_t('EINST.FEHLER_TOPIC');
+    } else {
+        $ev_mcfg['mqtt_topic'] = trim($ev_mtopic, '/');
+    }
+    if (!$ev_fehler) {
+        if (ev_config_write($ev_mcfg)) {
+            $ev_meldungen[] = ev_t('EINST.GESPEICHERT');
+        }
+    }
+    $ev_tab = 'tab-mqtt';
 }
 
 $ev_cfg = ev_config();
@@ -305,6 +326,25 @@ $ev_stand = ev_state();
   </label>
 </div>
 
+<?php /* MQTT stand hier bis zu dieser Fassung. Es wohnt jetzt
+         vollstaendig im Reiter MQTT - eine Sache, eine Stelle. */ ?>
+
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span>
+</div>
+<div class="sm-knopfreihe">
+  <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('ALLG.SPEICHERN')) ?></button>
+</div>
+</form>
+</div>
+
+<!-- ================= Reiter: MQTT ================= -->
+<div class="sm-seite" id="tab-mqtt">
+
+<h2>MQTT</h2>
+<form action="index.php" method="post">
+<input data-role="none" type="hidden" name="save_mqtt" value="1">
+<input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
 <h2><?= ev_e(ev_t('EINST.H_MQTT')) ?></h2>
 <?php if (!function_exists('ev_hs_autostart')) { function ev_hs_autostart() { $h = getenv('LBHOMEDIR') ?: '/opt/loxberry'; $g = $h . '/config/system/general.json'; if (!is_file($g)) { return null; } $j = json_decode((string) @file_get_contents($g), true); if (!is_array($j) || !isset($j['Mqtt'])) { return null; } return !empty($j['Mqtt']['Gatewayautostart']); } } if (ev_hs_autostart() === false) { ?><div class="sm-alert sm-warn"><b>MQTT:</b> <?php echo ev_t('EINST.W_AUTOSTART'); ?></div><?php } ?>
 <div class="sm-feld">
@@ -318,18 +358,11 @@ $ev_stand = ev_state();
   <input data-role="none" type="text" id="mqtt_topic" name="mqtt_topic" value="<?= ev_e($ev_cfg['mqtt_topic']) ?>" placeholder="evcc2lox">
   <div class="sm-hilfe"><?= ev_t('EINST.H_MQTT_TOPIC') ?></div>
 </div>
-
-<div class="sm-legende">
-<span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span>
-</div>
+<div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span></div>
 <div class="sm-knopfreihe">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('ALLG.SPEICHERN')) ?></button>
 </div>
 </form>
-</div>
-
-<!-- ================= Reiter: MQTT ================= -->
-<div class="sm-seite" id="tab-mqtt">
 <h2><?= ev_e(ev_t('MQTT.H_TITEL')) ?></h2>
 <?php $ev_m = ev_mqtt_zustand(); ?>
 <?php if (!$ev_m['gefunden']) { ?>
