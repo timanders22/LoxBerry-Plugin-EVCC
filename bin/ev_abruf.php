@@ -20,7 +20,47 @@
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 
-require_once dirname(__DIR__) . '/webfrontend/htmlauth/ev_lib.php';
+/* Die Bibliothek ueber eine Kandidatenliste finden - NICHT ueber eine feste
+ * Zahl von ".." nach oben.
+ *
+ * Im entpackten Archiv liegen bin/ und webfrontend/ nebeneinander, auf dem
+ * installierten LoxBerry in GETRENNTEN Baeumen:
+ *
+ *     /opt/loxberry/bin/plugins/<ordner>/ev_abruf.php
+ *     /opt/loxberry/webfrontend/htmlauth/plugins/<ordner>/ev_lib.php
+ *
+ * dirname(__DIR__) ergibt dort /opt/loxberry/bin/plugins - gesucht wurde also
+ * /opt/loxberry/bin/plugins/webfrontend/htmlauth/ev_lib.php. Die gibt es nicht: der
+ * Dienst brach bei JEDEM Cron-Lauf mit einem fatalen Fehler ab, und weil die
+ * Cron-Zeile nach /dev/null schreibt, stand das nirgends.
+ *
+ * Gefunden am 16.08.2026 mit Werkzeuge/installationslage_pruefen.py, nachdem
+ * dieselbe Zeile den Hintergrunddienst des Abfahrts-Assistenten von 1.5.0 bis
+ * 1.5.7 lahmgelegt hatte.
+ */
+$ev_lb = getenv('LBHOMEDIR');
+$ev_ordner = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
+$ev_kandidaten = array();
+if ($ev_lb) {
+    $ev_kandidaten[] = $ev_lb . '/webfrontend/htmlauth/plugins/' . $ev_ordner . '/ev_lib.php';
+}
+// installiert, ohne dass die Umgebungsvariablen gesetzt waeren:
+// .../bin/plugins/<ordner>  ->  .../webfrontend/htmlauth/plugins/<ordner>
+$ev_kandidaten[] = dirname(dirname(dirname(__DIR__)))
+                 . '/webfrontend/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php';
+// entpacktes Archiv: bin/ und webfrontend/ liegen nebeneinander
+$ev_kandidaten[] = dirname(__DIR__) . '/webfrontend/htmlauth/ev_lib.php';
+
+$ev_lib = '';
+foreach ($ev_kandidaten as $ev_kand) {
+    if (is_file($ev_kand)) { $ev_lib = $ev_kand; break; }
+}
+if ($ev_lib === '') {
+    fwrite(STDERR, "EVCC: ev_lib.php nicht gefunden. Gesucht wurde in:\n");
+    foreach ($ev_kandidaten as $ev_kand) { fwrite(STDERR, '  ' . $ev_kand . "\n"); }
+    exit(1);
+}
+require_once $ev_lib;
 
 $modus = isset($argv[1]) ? (string) $argv[1] : 'einmal';
 
