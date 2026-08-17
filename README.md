@@ -9,6 +9,310 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.17
+
+**Das Update spielte eine Entwicklerfassung ein, ohne es zu sagen.**
+
+Am Gerät gemessen: angekündigt war `0.314.0` (EVCCs eigene `availableVersion`),
+eingespielt wurde `0.315.0-dev+3c25327f7`. Auf der Maschine ist der
+**nightly**-Kanal von `dl.evcc.io` eingetragen, und `apt` nimmt die höchste
+Fassung aus *allen* Quellen. Das Skript aus 0.9.15 begrenzte nur das
+Auffrischen auf die EVCC-Quelle, nicht die Auswahl — und es nahm mit `head -1`
+die erste gefundene Quelldatei, ohne zu erwähnen, dass es mehrere gibt.
+
+- **Alle** `dl.evcc.io`-Quellen werden aufgefrischt und aufgelistet. Sind es
+  mehrere, steht der Hinweis dabei, dass `apt` die höchste Fassung aus allen
+  nimmt.
+- Vor der Installation gibt das Skript **`apt-cache policy evcc`** aus. Dort
+  steht, welche Fassung aus welchem Kanal genommen wird — wer das liest, wird
+  nicht überrascht.
+- Ist das Ergebnis eine Entwicklerfassung, wird das ausdrücklich gesagt — im
+  Ausgabetext des Skripts **und** als Hinweis im Reiter *Test*, solange sie
+  läuft.
+
+**Gepinnt wird nicht.** Wer den nightly-Kanal eingetragen hat, hat das
+vielleicht mit Absicht getan. Das Plugin entscheidet das nicht — es macht es
+sichtbar.
+
+## Neu in 0.9.16
+
+Zwei Texte, die seit 0.9.15 nicht mehr stimmten — beide am Bildschirm einer
+laufenden Anlage aufgefallen.
+
+- **„Das Plugin aktualisiert EVCC nicht selbst"** stand unter dem Hinweis auf
+  eine neuere EVCC-Fassung, während zwei Zeilen darüber in derselben
+  Selbstprüfung *„Kann die Oberfläche EVCC aktualisieren? **Ja**"* stand. Zwei
+  Aussagen auf einer Seite, die sich widersprechen. Der Satz hängt jetzt an
+  dem, was wirklich möglich ist: Knopf vorhanden und freigegeben, vorhanden
+  aber gesperrt, oder gar nicht vorhanden. Beide Stellen — Reiter *Test* und
+  der Hinweis im Reiter *Einstellungen* — holen ihn aus **einer** Quelle.
+- **„Fehlt ein Gerät (kein Speicher, keine PV), ist das richtig so"** erklärte
+  nicht, warum 23 Felder fehlen, wenn EVCC schlicht keinen Ladepunkt führt.
+  Gemessen an einer Anlage **mit** PV, aber ohne Wallbox: 13 von 51 Feldern
+  aufgelöst, und alle fehlenden `lp*`- und `fz*`-Felder hatten genau diesen
+  einen Grund. Führt EVCC keinen Ladepunkt, steht das jetzt dabei.
+
+## Neu in 0.9.15
+
+**EVCC lässt sich aus der Oberfläche aktualisieren — als Option, ab Werk aus.**
+
+Das Plugin installiert EVCC ohnehin selbst und zeigt seit 0.9.13 an, wenn eine
+neuere Fassung angeboten wird. Der Verweis auf die Kommandozeile war damit eine
+halbe Funktion. Der Knopf steht im Reiter *Test*, ist **orange** (er unterbricht
+eine laufende Ladung) und erscheint erst, wenn im Reiter *Einstellungen* der
+Haken gesetzt ist.
+
+Vier Wachen, ohne die es die Funktion nicht gäbe:
+
+- **`/etc/evcc.yaml` wird nie ersetzt.** Bei einer geänderten
+  Konfigurationsdatei fragt `dpkg` nach; in einem nicht-interaktiven Lauf
+  entschiede sonst eine Vorgabe über die Datei des Anwenders. Deshalb
+  `--force-confold` **und** eine datierte Sicherung vor jedem Lauf.
+- **Das ausgeführte Skript liegt nicht im Plugin-Ordner.** Der gehört dem
+  Benutzer `loxberry`; eine von root ausgeführte Datei, die ein
+  unprivilegierter Benutzer schreiben kann, wäre eine Hintertür. Die
+  Installation legt es nach `/usr/local/sbin/loxberry-evcc-update`, es gehört
+  `root`, und die sudo-Regel nennt genau diesen einen Pfad — **ohne
+  Argumente**, es gibt also nichts einzuschleusen.
+- **Nur die Paketquelle von EVCC wird aufgefrischt**, nicht das ganze System.
+  Ein `apt-get update` über alle Quellen kann an einer fremden, kaputten
+  Quelle scheitern — und dann hätte das Plugin etwas zerlegt, was es nichts
+  angeht.
+- **Nie automatisch.** Kein Cron, kein stiller Lauf. Ein Update startet EVCC
+  neu, und das entscheidet der Mensch.
+
+Gemeldet wird die **Wirkung**, nicht der Rückgabewert allein: die Fassung wird
+vor und nach dem Lauf ausgelesen und beides angezeigt. Hat sich nichts
+geändert, steht das ausdrücklich da, statt einen Erfolg zu behaupten.
+
+Die Deinstallation räumt Skript und sudo-Regel wieder weg — und sagt es
+ausdrücklich, wenn sie ohne Root-Rechte läuft und es nicht kann, statt still zu
+scheitern.
+
+## Neu in 0.9.14
+
+Beides am Bildschirm einer echten Anlage aufgefallen.
+
+- **Die Fehlermeldung von EVCC kam abgeschnitten an.** Angezeigt wurde
+  *„EVCC meldet: sponsorship"* statt *„sponsorship: token is expired — get a
+  fresh one from https://sponsor.evcc.io"*. Der Grund: die Auswertung nahm den
+  **ersten** lesbaren Teil der Struktur, und das ist offenbar nur die
+  Fehlerklasse. Die Form von `fatal` ist nicht dokumentiert — sie war geraten.
+  Jetzt werden **alle** lesbaren Teile in ihrer Reihenfolge zusammengesetzt:
+  eine Zeichenkette kommt unverändert heraus, `{klasse, meldung}` ergibt genau
+  den Satz aus der EVCC-Oberfläche, und jede andere Form verliert ebenfalls
+  nichts.
+- **„Es steht hier immer noch 127.0.0.1."** Der Wert im Feld *Adresse von
+  EVCC* ist richtig — das Plugin läuft auf dem LoxBerry und erreicht EVCC über
+  die Rückschleife. Anklicken lässt er sich von einem anderen Rechner aus
+  nicht, denn im Browser heißt `127.0.0.1` immer *dieser* PC. Unter dem Feld
+  steht jetzt die Adresse, die von dort aus wirklich trägt.
+
+## Neu in 0.9.13
+
+**Das Plugin hat gemeldet, alles sei in Ordnung, während nichts funktionierte.**
+
+An einer echten Anlage gemessen: EVCC 0.311.1 läuft als Dienst, `/api/state`
+antwortet mit HTTP 200 und gültigem JSON — und liefert 30 Schlüssel, die
+ausnahmslos Konfiguration sind. Kein Messwert. Die eigene Oberfläche von EVCC
+nannte den Grund: `sponsorship: token is expired`. EVCC hatte den Start
+abgebrochen. In der Antwort stand das die ganze Zeit, im Schlüssel `fatal`,
+dazu `setupRequired: true` und leere `loadpoints`.
+
+Bis 0.9.12 hat das Plugin daraus 97 Nullen gemacht, **22 von 22 Prüfungen als
+bestanden gemeldet** und die Leere mit *„Fehlt ein Gerät (kein Speicher, keine
+PV), ist das richtig so"* erklärt. Beruhigend und falsch — und in Loxone sieht
+0 kW Netzbezug aus wie ein ausgeglichenes Haus. Das ist die stille
+Falschaussage, die diese Hausregeln als schlimmste Fehlerart führen.
+
+- Eine neue Prüfzeile **„Läuft EVCC wirklich?"** steht vor der Feldzuordnung,
+  weil sie deren Ursache beantwortet. Sie zeigt ein Kreuz und **gibt den
+  Fehlertext von EVCC wörtlich wieder**.
+- Die Reihenfolge der Diagnose ist Absicht: erst der Startfehler, dann
+  „nicht eingerichtet". Wer damit anfängt, schickt jemanden in die
+  Grundeinrichtung, dessen Konfiguration längst steht.
+- Feldzuordnung und die vier Energiemanager-Zeilen beschwichtigen nicht mehr
+  mit *„ohne PV-Anlage ist das normal"*, solange EVCC nicht läuft.
+- Lässt sich **kein einziges** Feld zuordnen, obwohl EVCC läuft, ist das ein
+  Befund und kein Hinweis.
+- Neu für Loxone: **`EVCC_BETRIEBSBEREIT`** (0/1), **`FEHLER_NR = 5`**
+  (Startfehler) und **`FEHLER_NR = 4`** (nicht eingerichtet). Der Fehlertext
+  steht zusätzlich im Klartextfeld `LETZTER_FEHLER`. `OK` bleibt 1, denn die
+  Werte *sind* aktuell; es gibt nur keine. Wer auf brauchbare Zahlen wartet,
+  verknüpft `OK` **und** `BETRIEBSBEREIT`.
+- Meldet EVCC eine neuere Fassung (`availableVersion`), steht das jetzt in der
+  Oberfläche. Das Plugin aktualisiert EVCC nicht selbst.
+
+Die Feldpfade wurden **nicht** geändert. Der erste Verdacht lautete, die Form
+von `/api/state` habe sich in EVCC 0.311 verschoben; die Messung hat ihn
+widerlegt. Wer hier „korrigiert" hätte, hätte funktionierende Pfade gegen
+erfundene getauscht.
+
+## Neu in 0.9.12
+
+Drei Fehler, alle im Betrieb an einer echten Anlage aufgefallen — nicht am
+Prüfstand.
+
+- **Die Zweitschrift wurde gelesen, aber nie zurückgeschrieben.** Fehlt
+  `evcc.json` (etwa weil ein Update den Konfigurationsordner entfernt hat),
+  holte 0.9.11 die Werte bei *jedem* Aufruf erneut aus der Sicherung und
+  schrieb jedes Mal eine Protokollzeile. Gemessen: fünf Aufrufe, fünf Zeilen,
+  Datei nicht wiederhergestellt — und `ev_config()` läuft je Endpunktaufruf
+  mehrfach, der Cron viermal die Minute. 0.9.10 hatte die Datei einmal kopiert
+  und danach Ruhe gegeben; das war ein Rückschritt. Jetzt wird sie einmal
+  wiederhergestellt und einmal gemeldet. Der unangemeldete Endpunkt legt
+  weiterhin nichts an.
+- **Der Reiter MQTT trug drei Überschriften mit demselben Wort** — eine fest
+  im PHP, dazu `EINST.H_MQTT` und `MQTT.H_TITEL`, beide „MQTT". Die feste ist
+  weg, die beiden anderen heißen jetzt *Veröffentlichung nach MQTT* und
+  *MQTT-Gateway von LoxBerry*.
+- **Der Knopf „EVCC-Oberfläche" konnte nie funktionieren.** Er zeigte auf die
+  eingetragene Adresse, und die lautet üblicherweise `http://127.0.0.1:7070`.
+  Aus Sicht des LoxBerry ist das richtig — im Browser des Anwenders heißt
+  `127.0.0.1` aber *dieser PC*, und es kam ausnahmslos
+  `ERR_CONNECTION_REFUSED`. Der Knopf setzt jetzt den Namen ein, unter dem die
+  Seite gerade aufgerufen wurde, und behält den Port von EVCC. Die
+  Konfiguration bleibt unangetastet: der Abruf des Plugins läuft weiter über
+  `127.0.0.1`, und das ist dort auch richtig.
+- **„Dienst start ausgeführt."** — der englische Unterbefehl von `systemctl`
+  stand wörtlich in einem deutschen Satz. Es gibt jetzt je Vorgang einen
+  eigenen, richtig gebeugten Satz in beiden Sprachen: *Der EVCC-Dienst wurde
+  gestartet / angehalten / neu gestartet.*
+
+## Neu in 0.9.11
+
+### Zwei Ausfälle, die das Plugin am Gerät unbrauchbar gemacht haben
+
+**Der Endpunkt für den Miniserver ist nie angelaufen.** `webfrontend/html/index.php`
+suchte seine Programmbibliothek über `dirname(__DIR__) . '/htmlauth/ev_lib.php'`.
+Im entpackten Archiv liegen `html/` und `htmlauth/` nebeneinander, auf dem
+installierten LoxBerry in getrennten Bäumen — gesucht wurde dort
+`webfrontend/html/plugins/htmlauth/ev_lib.php`, ein Verzeichnis, das es nicht
+gibt. `require_once` brach fatal ab, und weil vier Zeilen darüber
+`display_errors` abgeschaltet wird, kam beim Miniserver ein **leerer HTTP 500**
+an: keine Meldung, kein Protokolleintrag. Gemessen im nachgebauten Aufbau:
+**alle 18 Aufrufe** — vier lesende, vierzehn schreibende, dazu die
+Token-Abweisung — endeten mit HTTP 500 und 0 Byte. Damit hat dieses Plugin auf
+keiner echten Anlage je einen Wert nach Loxone geliefert und keinen Befehl
+ausgeführt.
+
+Genau diese Korrektur hatte `bin/ev_abruf.php` schon in 0.9.9 bekommen. Die
+Nachbardatei nicht.
+
+**Die Bedienoberfläche war ebenfalls nicht erreichbar.** `loxberry_system.php`
+überschreibt beim Einbinden das `$p` des Aufrufers. `webfrontend/htmlauth/index.php`
+las danach `$p['home']` und suchte `/libs/phplib/loxberry_web.php` — die Seite
+brach fatal ab. Gemessen unter PHP 7.4 **und** 8.4: 0 Zeichen Ausgabe.
+
+Beides ist behoben; jede Variable im Hauptteil trägt jetzt das Plugin-Kürzel.
+
+### Die Selbstheilung hat ihre eigene Rettung zerstört
+
+Eine **abgeschnittene** `evcc.json` — Stromausfall mitten im Schreiben — galt
+nicht als beschädigt, sondern als leer. Es entstand die Werkseinstellung, und
+weil das Token damit fehlte, wurde sofort zurückgeschrieben — **über die
+intakte Zweitschrift**. Gemessen: EVCC-Passwort weg, Token neu (und damit alle
+Adressen in Loxone Config ungültig), Sicherung mit vernichtet, kein Wort im
+Protokoll.
+
+Jetzt ist ungültiges JSON ein Fehler: er wird protokolliert, die Zweitschrift
+wird **gelesen** statt überschrieben, und die beschädigte Datei bleibt als
+`evcc.json.kaputt` liegen. Geschrieben wird über eine Nebendatei mit `rename` —
+ein halb geschriebener Stand kann nicht mehr entstehen.
+
+### Weitere behobene Fehler
+
+- **MQTT-Autostart** wurde am Schlüssel `Autostart` abgelesen; er heißt
+  `Gatewayautostart`. Der Reiter *Test* zeigte deshalb bei korrekt
+  eingerichtetem Gateway ein dauerhaftes Kreuz und der Reiter *MQTT* eine
+  Warnung, die nie zutraf.
+- **Ohne JavaScript war die Seite leer.** `sm-active` stand nur in CSS und
+  Skript, nie im ausgelieferten HTML. Jetzt entscheidet der Server, welcher
+  Reiter offen ist.
+- **Der unangemeldete Endpunkt hat geschrieben.** Ein Aufruf *ohne* Token legte
+  Konfiguration, Sperrdatei und Zweitschrift an. Er liest jetzt nur noch.
+- **Die Deinstallation ließ Passwort und Token liegen** — in
+  `config/plugins/evcc.backup.evcc.json`, neben dem Ordner, den sie entfernt —
+  und meldete zwei Zeilen später, beides sei gelöscht.
+- **Die sudo-Regel wurde nie angelegt**, wenn EVCC schon installiert war. Wer
+  EVCC von Hand eingerichtet hatte, bekam drei Knöpfe, die nie wirken konnten.
+- **Die Loxone-Vorlage war nicht stabil**: ohne Zwischenspeicher fehlte je
+  Fahrzeug ein Eingang. Da `/tmp` eine Ramdisk ist, entstand nach jedem
+  Neustart die kurze Fassung.
+- **MQTT lief über `socket_create`** aus der Erweiterung `php-sockets`, die
+  nicht in `dpkg/apt` stand. Fehlt sie, ist das kein abfangbarer Fehler,
+  sondern ein fataler. Jetzt über `stream_socket_client`, das zum Kern gehört.
+- **Der Cron warf die Fehlerausgabe weg** — genau die Auskunft, die 0.9.9
+  eingebaut hatte. Sie landet jetzt in `cron.err`.
+- **Fehlermeldungen nennen den Antwortenden**: „Verbindung abgewiesen",
+  „Zeitüberschreitung" und „kein Weg dorthin" sind drei verschiedene Ursachen.
+  Kommt HTML statt JSON, steht das samt HTTP-Code und Anfang der Antwort da.
+- Der Endpunkt fragt EVCC nicht mehr bei **jeder** Loxone-Abfrage selbst an;
+  die Ausgangsvorlage trägt `CmdOnMethod`, `CmdOffMethod` und `Repeat`, die
+  Eingangsvorlage ein `<Info>`-Element und `Unit`; `ctype_digit` ist raus;
+  `CUSTOM_LOGLEVELS` und `ARCHITECTURE` stehen auf `false`, weil beide nichts
+  bewirkt haben; die Überschrift im Reiter *Logdateien* heißt nicht mehr
+  „Protokoll".
+
+### Der Reiter Test ruft den Endpunkt jetzt wirklich auf
+
+Achtzehn Prüfzeilen hatte 0.9.10 — und keine einzige rief den eigenen Endpunkt
+auf. Beide Ausfälle wären am ersten Tag sichtbar gewesen. Die erste Zeile ist
+jetzt ein echter HTTP-Aufruf. Geeicht in drei Richtungen: gegen 0.9.11 grün,
+gegen den Endpunkt aus 0.9.10 rot mit der Meldung *„leere Antwort — der
+Endpunkt ist mit einem fatalen Fehler abgebrochen"*, und ohne erreichbaren
+Server ein **Hinweis** statt eines Kreuzes — ein Webserver, der nur eine
+Anfrage zugleich bearbeitet, kann sich nicht selbst aufrufen, und ein Kreuz,
+das nichts bedeutet, ist schlimmer als keine Prüfung.
+
+Dazu neu: findet der Endpunkt seine Bibliothek, stimmen Reiterleiste, Bereiche
+und Positivliste überein, ist die Vorlage unabhängig vom Zwischenspeicher, ist
+jedes Suchmuster in der Statuszeile eindeutig, darf die Oberfläche den Dienst
+schalten, gibt es eine Zweitschrift.
+
+### Neue Werte und Befehle
+
+**Rückmeldung für alles Schaltbare.** Bis 0.9.10 gingen 15 Befehle hinaus und
+nur 7 kamen als Wert zurück — Loxone konnte nicht erkennen, ob ein Befehl
+gewirkt hat. Ergänzt sind Mindest-Ladestand, kleinster und höchster Ladestrom,
+Preisschwelle, Battery Boost, eingestellte Phasen, Batteriemodus,
+Residualleistung und Entladeregelung.
+
+**Neue Lesewerte:** Zählerstände für Netzbezug, PV-Ertrag und je Ladepunkt;
+Solarprognose für drei Tage; Preisvorschau mit Minimum, Maximum, Durchschnitt,
+**Rang der laufenden Stunde** und günstigster Stunde; die Wartegründe
+(PV-Überschuss, Phasenumschaltung) als Minutenwerte; Sitzungsdaten mit Energie,
+Kosten, Preis je kWh und CO₂; Ladedauer, Restenergie, Ladestrom; Fahrzeugname
+als Text; eine Fehlernummer und die letzte Fehlermeldung im Klartext.
+
+**Neue Befehle:** Ladeplan setzen (Ziel-Ladestand und Vorlauf in Stunden — die
+Zeit rechnet das Plugin, Loxone kann keine ISO-Zeit bilden) und löschen,
+Ladeziel in kWh, Fahrzeug zuordnen und lösen, Netzladegrenze setzen und
+abschalten.
+
+**Und eine Warnung, die dazugehört:** die neuen Felder und Befehle stammen aus
+der EVCC-Dokumentation und sind **an keiner Anlage gemessen**. Sie sind deshalb
+überall als solche gekennzeichnet — im Reiter *Test* getrennt gezählt, in der
+Befehlstabelle in der Spalte *Herkunft*, im Kommentar der erzeugten
+Loxone-Vorlage und in der Antwort des Endpunkts, die bei einem unbekannten Pfad
+ausdrücklich sagt, dass der Befehl aus der Dokumentation stammt. Kennt Ihre
+EVCC-Fassung ein Feld nicht, bleibt es leer und der Reiter *Test* sagt welches
+— das ist kein Fehler des Plugins.
+
+Nicht behauptet wird die **Einheit der Solarprognose**: ob EVCC sie in Wh oder
+kWh liefert, hat niemand gemessen. Die Felder heißen deshalb
+`EVCC_PROGNOSE_HEUTE` ohne Einheit im Namen, und der Wert geht durch, wie er
+kommt. Einmal gegen die EVCC-Oberfläche halten.
+
+### Nach dem Update prüfen
+
+```bash
+php /opt/loxberry/bin/plugins/<ordner>/ev_abruf.php; echo "Rueckgabewert: $?"
+```
+
+Danach im Reiter *Test* die erste Zeile ansehen — sie beantwortet die Frage,
+an der 0.9.10 gescheitert ist.
+
 ## Neu in 0.9.9
 
 **Der Abrufdienst konnte nie starten.** `bin/ev_abruf.php` suchte seine Programmbibliothek

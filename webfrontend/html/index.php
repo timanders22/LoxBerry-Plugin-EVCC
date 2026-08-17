@@ -12,18 +12,17 @@
  *
  * Lesende Aktionen:
  *   status      eine Zeile EVCC;FELD=WERT;...   (Vorgabe)
- *   json        der Zustand als JSON
+ *   json        der Zustand als JSON, mit allen Feldern - auch den Texten
  *   roh         die unveraenderte Antwort von EVCC - fuer die Fehlersuche
  *   wert        ein einzelner Wert, blank ausgegeben (&feld=netz_kw)
+ *   befehle     die Liste der schreibenden Befehle samt Herkunft
  *
  * Schreibende Aktionen (nur wenn im Reiter Einstellungen freigegeben):
- *   modus, limitsoc, minsoc, phasen, minstrom, maxstrom, prioritaet,
- *   smartcostlimit, batterieboost      je mit &lp=<Nummer>
- *   batteriemodus, prioritaetssoc, puffersoc, residualleistung,
- *   entladeregelung
+ *   siehe ev_befehle() in ev_lib.php - dort stehen sie EINMAL, und Endpunkt,
+ *   Oberflaeche und Loxone-Vorlage lesen alle von dort.
  *
  * Der Datenabruf gehoert NICHT hierher - der laeuft in bin/ev_abruf.php.
- * Dieser Endpunkt liest nur den zwischengespeicherten Zustand und reicht
+ * Dieser Endpunkt liest den zwischengespeicherten Zustand und reicht
  * Schaltbefehle weiter.
  */
 
@@ -32,7 +31,60 @@ ini_set('display_errors', '0');
 header('Cache-Control: no-store');
 header('Content-Type: text/plain; charset=utf-8');
 
-require_once dirname(__DIR__) . '/htmlauth/ev_lib.php';
+/* ==================================================================
+ * DIE BIBLIOTHEK FINDEN - in BEIDEN Ablagen
+ * ==================================================================
+ *
+ * Bis 0.9.10 stand hier schlicht
+ *
+ *     require_once dirname(__DIR__) . '/htmlauth/ev_lib.php';
+ *
+ * Das stimmt im entpackten Archiv, wo html/ und htmlauth/ nebeneinander
+ * liegen. Auf einem installierten LoxBerry liegen sie in GETRENNTEN Baeumen:
+ *
+ *     <home>/webfrontend/html/plugins/<ordner>/       <- diese Datei
+ *     <home>/webfrontend/htmlauth/plugins/<ordner>/   <- die Bibliothek
+ *
+ * dirname(__DIR__) ergab dort <home>/webfrontend/html/plugins, gesucht wurde
+ * also .../html/plugins/htmlauth/ev_lib.php. Die gibt es nicht. require_once
+ * brach fatal ab, und weil vier Zeilen darueber display_errors abgeschaltet
+ * wird, kam beim Miniserver ein leerer HTTP 500 an - kein Text, kein
+ * Protokolleintrag, nichts.
+ *
+ * Gemessen am 17.08.2026 im nachgebauten Aufbau: ALLE 18 Aufrufe (vier
+ * lesende, vierzehn schreibende) endeten mit HTTP 500 und 0 Byte, auch die
+ * Token-Abweisung. Nach der Korrektur antworten sie mit 200, 403 und 400.
+ *
+ * bin/ev_abruf.php hat diese Kandidatenliste seit 0.9.9 - die Nachbardatei
+ * hat sie damals nicht bekommen. Dieselbe Klasse hatte Renault bis 2.0.6,
+ * Heimkino bis 1.2.10 und Intercom bis 2.1.12.
+ *
+ * ACHTUNG: Diese Liste hat ein Gegenstueck in ev_endpunkt_kandidaten()
+ * (ev_lib.php), das der Reiter Test anzeigt. Sie laesst sich nicht
+ * zusammenlegen - hier wird sie gebraucht, BEVOR die Bibliothek geladen ist.
+ * Belegt wird der Zustand deshalb nicht durch die Liste, sondern dadurch,
+ * dass der Reiter Test diesen Endpunkt wirklich ueber HTTP aufruft.
+ */
+$ev_kandidaten = array(
+    dirname(dirname(dirname(__DIR__))) . '/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php',
+    dirname(dirname(__DIR__)) . '/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php',
+    dirname(__DIR__) . '/htmlauth/ev_lib.php',
+);
+$ev_lib = '';
+foreach ($ev_kandidaten as $ev_k) {
+    if (is_file($ev_k)) { $ev_lib = $ev_k; break; }
+}
+if ($ev_lib === '') {
+    // Reden, nicht schweigen. Ein leerer 500 hat dieses Plugin eine ganze
+    // Fassung gekostet.
+    http_response_code(500);
+    echo "EVCC;OK=0;GRUND=BIBLIOTHEK_FEHLT\n";
+    echo "ev_lib.php nicht gefunden. Erwartet unter htmlauth/plugins/"
+       . basename(__DIR__) . "/ - gesucht wurde in:\n";
+    foreach ($ev_kandidaten as $ev_k) { echo '  ' . $ev_k . "\n"; }
+    exit;
+}
+require_once $ev_lib;
 
 function ev_ende($code, $text)
 {
@@ -42,7 +94,7 @@ function ev_ende($code, $text)
     // koennen mehrzeilig sein, ebenso Antworten von EVCC), zerfaellt die
     // Zeile, und Loxone sieht nur noch den ersten Teil.
     //
-    // Die mehrzeiligen Ausgaben (json, roh) laufen nicht ueber diese
+    // Die mehrzeiligen Ausgaben (json, roh, befehle) laufen nicht ueber diese
     // Funktion, sondern schreiben direkt. Was hier ankommt, ist immer eine
     // Statuszeile - auch die Liste der erlaubten Aktionen, die dadurch in
     // einer Zeile steht statt in zweien. Lesbar bleibt sie.
@@ -51,53 +103,103 @@ function ev_ende($code, $text)
     exit;
 }
 
-$cfg = ev_config();
+/* Der unangemeldete Endpunkt DARF NICHTS ANLEGEN.
+ *
+ * Bis 0.9.10 rief er ev_config() ohne Einschraenkung auf. Gemessen mit leerem
+ * Konfigurationsordner: ein einziger Aufruf OHNE Token - beantwortet mit
+ * 403 - hinterliess .token.lock, evcc.json (mit frisch erzeugtem Token) und
+ * die Zweitschrift. Wer sich nicht ausweisen kann, legt nichts an. */
+$cfg = ev_config(false);
 
 /* ---------------- Token ---------------- */
 $soll = (string) $cfg['aktionstoken'];
 $ist  = isset($_GET['token']) ? (string) $_GET['token'] : '';
-if ($soll === '' || !hash_equals($soll, $ist)) {
+if ($soll === '') {
+    // Kein Token in der Konfiguration: das Plugin wurde noch nie in der
+    // Oberflaeche geoeffnet, oder das Betriebssystem liefert keinen sicheren
+    // Zufall. Das ist etwas anderes als ein falsches Token, und der Nutzer
+    // soll es unterscheiden koennen - preisgegeben wird dabei nichts.
+    ev_ende(503, 'EVCC;OK=0;GRUND=KEIN_TOKEN_EINGERICHTET');
+}
+if (!hash_equals($soll, $ist)) {
     // Bewusst keine Auskunft darueber, ob das Token zu kurz, zu lang oder
     // schlicht falsch war.
     ev_ende(403, 'EVCC;OK=0;GRUND=TOKEN');
 }
 
 /* ---------------- Aktion gegen die Weissliste ---------------- */
-$lesend = array('status', 'json', 'roh', 'wert');
-$schreibend = array('modus', 'limitsoc', 'minsoc', 'phasen', 'minstrom', 'maxstrom',
-                    'prioritaet', 'smartcostlimit', 'batterieboost',
-                    'batteriemodus', 'prioritaetssoc', 'puffersoc',
-                    'residualleistung', 'entladeregelung');
+$lesend = array('status', 'json', 'roh', 'wert', 'befehle');
+$befehle = ev_befehle();
+$schreibend = array_keys($befehle);
 $aktion = isset($_GET['aktion']) ? (string) $_GET['aktion'] : 'status';
 if (!in_array($aktion, array_merge($lesend, $schreibend), true)) {
     ev_ende(400, "EVCC;OK=0;GRUND=UNBEKANNTE_AKTION\n"
                  . 'Erlaubt: ' . implode(', ', array_merge($lesend, $schreibend)));
 }
 
+/* Wie alt darf der zwischengespeicherte Zustand sein?
+ *
+ * Bis 0.9.10 galt takt/2 - bei Takt 15 also 7 Sekunden, waehrend die erzeugte
+ * Vorlage alle 30 Sekunden fragt. Damit war der Stand bei JEDER Abfrage
+ * abgelaufen und der Endpunkt stellte selbst eine HTTP-Anfrage mit bis zu 8 s
+ * Zeitgrenze - obwohl in seinem eigenen Kopf steht, er lese nur den
+ * Zwischenspeicher. Der Abrufdienst fuellt ihn jede Taktlaenge; zweieinhalb
+ * Takte Nachsicht heisst: im Normalbetrieb kein einziger eigener Abruf, und
+ * bei stehendem Dienst trotzdem nach kurzer Zeit ein frischer Versuch. */
+$ev_hoechstalter = max(30, (int) round($cfg['takt'] * 2.5));
+
 /* ---------------- Lesende Aktionen ---------------- */
 
 if ($aktion === 'roh') {
-    $st = ev_state();
+    $st = ev_state(false, $ev_hoechstalter);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode($st['roh'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
 if ($aktion === 'json') {
-    $st = ev_state();
+    $st = ev_state(false, $ev_hoechstalter);
     $werte = ev_werte($st);
+    $felder = ev_felder();
     $flach = array();
     foreach ($werte as $k => $d) { $flach[$k] = $d['wert']; }
+    // Welche Felder sich nicht aufloesen liessen, gehoert dazu - sonst sieht
+    // eine 0 aus wie eine Messung. Und welche davon in 0.9.11 aus der
+    // Dokumentation kamen, ebenfalls.
+    $ohne = array();
+    $ungemessen = array();
+    foreach ($felder as $k => $d) {
+        if (!empty($d['pfade']) && isset($werte[$k]) && $werte[$k]['pfad'] === '') { $ohne[] = $k; }
+        if ($d['quelle'] === 'doku') { $ungemessen[] = $k; }
+    }
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(array('ok' => $st['ok'], 'stand' => $st['stand'],
-                           'fehler' => $st['fehler'], 'werte' => $flach),
+                           'fehler' => $st['fehler'],
+                           'fehler_nr' => isset($st['fehlernr']) ? (int) $st['fehlernr'] : 0,
+                           'nicht_gefunden' => $ohne,
+                           'aus_der_dokumentation' => $ungemessen,
+                           'werte' => $flach),
                      JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+if ($aktion === 'befehle') {
+    // Damit man ohne Oberflaeche nachsehen kann, was es gibt - und was davon
+    // gemessen ist.
+    header('Content-Type: application/json; charset=utf-8');
+    $aus = array();
+    foreach ($befehle as $n => $b) {
+        $aus[$n] = array('ebene' => $b['ebene'], 'methode' => $b['methode'],
+                         'pfad' => $b['pfad'], 'pruefung' => $b['pruef'],
+                         'quelle' => $b['quelle']);
+    }
+    echo json_encode($aus, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
 if ($aktion === 'wert') {
     $feld = isset($_GET['feld']) ? preg_replace('/[^a-z0-9_]/', '', (string) $_GET['feld']) : '';
-    $werte = ev_werte();
+    $werte = ev_werte(ev_state(false, $ev_hoechstalter));
     if ($feld === '' || !isset($werte[$feld])) {
         ev_ende(400, '-');
     }
@@ -106,7 +208,7 @@ if ($aktion === 'wert') {
 }
 
 if ($aktion === 'status') {
-    echo ev_zeile();
+    echo ev_zeile(ev_werte(ev_state(false, $ev_hoechstalter)));
     exit;
 }
 
@@ -118,133 +220,63 @@ if (empty($cfg['steuerung_ein'])) {
                  . 'Haken "Steuerung aus Loxone zulassen".');
 }
 
+$b = $befehle[$aktion];
+
+/* Ladepunkt pruefen - aber nur, wo einer gebraucht wird. */
+$lp = isset($_GET['lp']) ? (int) $_GET['lp'] : 1;
+if ($b['ebene'] === 'lp' && ($lp < 1 || $lp > EV_LADEPUNKTE)) {
+    ev_ende(400, 'EVCC;OK=0;GRUND=LADEPUNKT_UNGUELTIG;ERLAUBT=1..' . EV_LADEPUNKTE);
+}
+
+/* Wert pruefen. Die Regel steht in ev_befehle(), nicht hier - so kann sie
+ * nicht zwischen Endpunkt, Oberflaeche und Vorlage auseinanderlaufen. */
 $wert = isset($_GET['wert']) ? trim((string) $_GET['wert']) : '';
-if ($wert === '') {
+if ($b['pruef'] !== 'ohne' && $wert === '') {
     ev_ende(400, 'EVCC;OK=0;GRUND=WERT_FEHLT');
 }
-$lp = isset($_GET['lp']) ? (int) $_GET['lp'] : 1;
-if ($lp < 1 || $lp > EV_LADEPUNKTE) {
-    ev_ende(400, 'EVCC;OK=0;GRUND=LADEPUNKT_UNGUELTIG');
+list($ok, $klar) = ev_befehl_pruefen($b, $wert);
+if (!$ok) {
+    ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=' . $klar);
 }
 
-/**
- * Zuordnung Aktion -> EVCC-Pfad und erlaubter Wertebereich.
- *
- * Die Werte werden GEPRUEFT, nicht zurechtgebogen: ein Lademodus, den EVCC
- * nicht kennt, wird abgewiesen statt stillschweigend auf 'off' gesetzt.
- * Loxone schickt Analogwerte oft als '3.000000' - deshalb wird bei
- * ganzzahligen Feldern gerundet, bevor geprueft wird.
- */
-$zahl = str_replace(',', '.', $wert);
-$ganz = is_numeric($zahl) ? (int) round((float) $zahl) : null;
-
-switch ($aktion) {
-    case 'modus':
-        // Loxone kann die Zahl 0..3 oder den Text schicken.
-        $modus = is_numeric($zahl) ? ev_modus_text($ganz) : strtolower($wert);
-        if (!in_array($modus, array('off', 'now', 'minpv', 'pv'), true)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=MODUS_UNGUELTIG;ERLAUBT=off,now,minpv,pv,0,1,2,3');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/mode/' . rawurlencode($modus);
-        $klar = $modus;
-        break;
-
-    case 'limitsoc':
-    case 'minsoc':
-        if ($ganz === null || $ganz < 0 || $ganz > 100) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0..100');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/' . ($aktion === 'limitsoc' ? 'limitsoc' : 'minsoc') . '/' . $ganz;
-        $klar = (string) $ganz;
-        break;
-
-    case 'phasen':
-        if (!in_array($ganz, array(0, 1, 3), true)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0,1,3');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/phases/' . $ganz;
-        $klar = (string) $ganz;
-        break;
-
-    case 'minstrom':
-    case 'maxstrom':
-        if ($ganz === null || $ganz < 0 || $ganz > 80) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0..80');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/' . ($aktion === 'minstrom' ? 'mincurrent' : 'maxcurrent') . '/' . $ganz;
-        $klar = (string) $ganz;
-        break;
-
-    case 'prioritaet':
-        if ($ganz === null || $ganz < 0 || $ganz > 10) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0..10');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/priority/' . $ganz;
-        $klar = (string) $ganz;
-        break;
-
-    case 'smartcostlimit':
-        if (!is_numeric($zahl)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=KEINE_ZAHL');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/smartcostlimit/' . rawurlencode((string) (float) $zahl);
-        $klar = (string) (float) $zahl;
-        break;
-
-    case 'batterieboost':
-        if (!in_array($ganz, array(0, 1), true)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0,1');
-        }
-        $pfad = '/api/loadpoints/' . $lp . '/batteryboost/' . $ganz;
-        $klar = (string) $ganz;
-        break;
-
-    case 'batteriemodus':
-        $m = is_numeric($zahl)
-            ? (array(0 => 'normal', 1 => 'hold', 2 => 'charge')[$ganz] ?? '')
-            : strtolower($wert);
-        if (!in_array($m, array('normal', 'hold', 'charge'), true)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=normal,hold,charge,0,1,2');
-        }
-        $pfad = '/api/batterymode/' . rawurlencode($m);
-        $klar = $m;
-        break;
-
-    case 'prioritaetssoc':
-    case 'puffersoc':
-        if ($ganz === null || $ganz < 0 || $ganz > 100) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0..100');
-        }
-        $pfad = '/api/' . ($aktion === 'prioritaetssoc' ? 'prioritysoc' : 'buffersoc') . '/' . $ganz;
-        $klar = (string) $ganz;
-        break;
-
-    case 'residualleistung':
-        if (!is_numeric($zahl)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=KEINE_ZAHL');
-        }
-        $pfad = '/api/residualpower/' . rawurlencode((string) (int) round((float) $zahl));
-        $klar = (string) (int) round((float) $zahl);
-        break;
-
-    case 'entladeregelung':
-        if (!in_array($ganz, array(0, 1), true)) {
-            ev_ende(400, 'EVCC;OK=0;GRUND=BEREICH;ERLAUBT=0,1');
-        }
-        $pfad = '/api/batterydischargecontrol/' . ($ganz ? 'true' : 'false');
-        $klar = $ganz ? 'true' : 'false';
-        break;
-
-    default:
-        ev_ende(400, 'EVCC;OK=0;GRUND=UNBEKANNTE_AKTION');
+/* Der Ladeplan braucht zusaetzlich eine Zeit. Loxone kann keine ISO-Zeit
+ * bilden, deshalb wird sie als VORLAUF IN STUNDEN uebergeben und hier
+ * gerechnet - das ist die Zahl, die ein Loxone-Baustein ohnehin hat. */
+$zeit = '';
+if ($b['pruef'] === 'plan') {
+    $std = isset($_GET['stunden']) ? str_replace(',', '.', (string) $_GET['stunden']) : '';
+    if (!is_numeric($std)) {
+        ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=STUNDEN_FEHLT;ERLAUBT=0.25..168');
+    }
+    $std = (float) $std;
+    if ($std < 0.25 || $std > 168) {
+        ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BEREICH;FELD=stunden;ERLAUBT=0.25..168');
+    }
+    $zeit = gmdate('Y-m-d\TH:i:s\Z', time() + (int) round($std * 3600));
 }
 
-$a = ev_http($pfad, 'POST');
+$pfad = str_replace(
+    array('%LP%', '%WERT%', '%ZEIT%'),
+    array((string) $lp, rawurlencode($klar), rawurlencode($zeit)),
+    $b['pfad']);
+
+$a = ev_http($pfad, $b['methode']);
 if (!$a['ok']) {
     ev_log('Befehl ' . $aktion . ' (' . $klar . ') an ' . $pfad . ' FEHLGESCHLAGEN: ' . $a['fehler']);
-    ev_ende(502, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=' . str_replace(';', ',', (string) $a['fehler']));
+    /* Ein Befehl aus der Dokumentation, den EVCC nicht kennt, sieht in der
+     * Antwort anders aus als ein Netzfehler - sonst sucht man den Fehler bei
+     * der Verkabelung, wo er beim Pfad liegt. */
+    $zusatz = '';
+    if ($b['quelle'] === 'doku' && (int) $a['code'] === 404) {
+        $zusatz = ';HINWEIS=Dieser Befehl stammt aus der EVCC-Dokumentation und ist an keiner '
+                . 'Anlage gemessen. Ihre EVCC-Fassung kennt den Pfad ' . $b['pfad'] . ' nicht.';
+    }
+    ev_ende(502, 'EVCC;OK=0;AKTION=' . $aktion . ';CODE=' . (int) $a['code']
+                 . ';GRUND=' . str_replace(';', ',', (string) $a['fehler']) . $zusatz);
 }
-ev_log('Befehl ' . $aktion . ' (' . $klar . ') an Ladepunkt ' . $lp . ' gesendet');
+ev_log('Befehl ' . $aktion . ' (' . $klar . ') an '
+     . ($b['ebene'] === 'lp' ? 'Ladepunkt ' . $lp : 'die Anlage') . ' gesendet');
 // Der zwischengespeicherte Zustand ist jetzt veraltet.
 @unlink(ev_tmpdir() . '/state.json');
-printf("EVCC;OK=1;AKTION=%s;WERT=%s\n", $aktion, $klar);
+printf("EVCC;OK=1;AKTION=%s;WERT=%s%s\n", $aktion, $klar,
+       $zeit !== '' ? ';ZEIT=' . $zeit : '');

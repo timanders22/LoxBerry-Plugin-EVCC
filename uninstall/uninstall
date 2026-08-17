@@ -35,8 +35,41 @@ for verzeichnis in "$LBHOME/config/plugins/$PDIR" "$LBHOME/data/plugins/$PDIR"; 
         echo "<OK> $verzeichnis entfernt."
     fi
 done
-rm -rf "/tmp/${PDIR}_upgrade" "/run/shm/${PDIR}" 2>/dev/null
+# Die Zweitschrift liegt NEBEN dem Plugin-Ordner, nicht darin - siehe
+# ev_paths() in ev_lib.php. Das ist Absicht (LoxBerry raeumt
+# config/plugins/<ordner>/ bei der Deinstallation weg, und genau dann soll die
+# Sicherung ueberleben), hatte aber bis 0.9.10 eine haessliche Folge: die
+# Schleife oben entfernt nur Verzeichnisse, die Datei blieb liegen - mit dem
+# EVCC-Passwort im Klartext und dem Token des unangemeldeten Endpunkts. Und
+# zwei Zeilen darunter stand, beides sei geloescht.
+#
+# Verschaerfend: ev_config() holt genau diese Datei bei einer NEUinstallation
+# stillschweigend zurueck. Eine saubere Neuinstallation war damit keine.
+for datei in "$LBHOME/config/plugins/$PDIR.backup.evcc.json" \
+             "$LBHOME/config/plugins/$PDIR/evcc.backup.json" \
+             "$LBHOME/config/plugins/$PDIR/evcc.json.kaputt"; do
+    if [ -f "$datei" ]; then
+        rm -f "$datei"
+        echo "<OK> $datei entfernt."
+    fi
+done
+
+rm -rf "/tmp/${PDIR}_upgrade" "/run/shm/${PDIR}" "/tmp/${PDIR}" 2>/dev/null
 echo "<INFO> Zugangsdaten und Zugriffstoken des Plugins sind geloescht."
+
+# Was postroot.sh als root angelegt hat, gehoert auch wieder weg. Laeuft die
+# Deinstallation nicht als root, wird das ehrlich gesagt statt still zu
+# scheitern - ein Befehl, der genau dann nichts tut, wenn er gebraucht wird,
+# ist schlimmer als keiner.
+for datei in /usr/local/sbin/loxberry-evcc-update /etc/sudoers.d/loxberry-evcc; do
+    if [ -e "$datei" ]; then
+        if [ "$(id -u)" = "0" ]; then
+            rm -f "$datei" && echo "<OK> $datei entfernt."
+        else
+            echo "<INFO> $datei bleibt liegen (keine Root-Rechte). Von Hand: sudo rm -f $datei"
+        fi
+    fi
+done
 
 echo "<INFO> EVCC selbst bleibt installiert und laeuft weiter."
 echo "<INFO> Wer es auch entfernen will:"

@@ -10,15 +10,39 @@ error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 require_once __DIR__ . '/ev_lib.php';
 require_once __DIR__ . '/ev_test.php';
 
-$p = ev_paths();
-if ($p['home'] !== '' && file_exists($p['home'] . '/libs/phplib/loxberry_system.php')) {
-    require_once $p['home'] . '/libs/phplib/loxberry_system.php';
-    require_once $p['home'] . '/libs/phplib/loxberry_web.php';
+/* JEDE Variable im Hauptteil traegt das Plugin-Kuerzel - niemals nur $p.
+ *
+ * loxberry_system.php setzt beim Einbinden ein eigenes $p in den Bereich des
+ * Aufrufers: array("", "libs", "phplib", "loxberry_system.php"). Bis 0.9.10
+ * stand hier $p, und Zeile 16 las danach $p['home'] aus genau diesem Feld -
+ * also nichts. Gesucht wurde daraufhin /libs/phplib/loxberry_web.php, das es
+ * nirgends gibt: die GESAMTE Oberflaeche brach mit einem fatalen Fehler ab,
+ * auf dem Geraet als HTTP 500 mit leerem Rumpf. Gemessen unter PHP 7.4 und
+ * 8.4, beide Male 0 Zeichen Ausgabe.
+ *
+ * REGELN_2 nennt EVCC dafuer beim Namen ("genau drei hiessen $p: EVCC,
+ * SignalBot und WaermepumpeCloud"); die beiden anderen waren berichtigt.
+ *
+ * Deshalb: eigener Name, Wert VOR dem Einbinden retten, und danach neu holen. */
+$ev_p = ev_paths();
+$ev_home = (string) $ev_p['home'];
+if ($ev_home !== '' && file_exists($ev_home . '/libs/phplib/loxberry_system.php')) {
+    require_once $ev_home . '/libs/phplib/loxberry_system.php';
+    if (file_exists($ev_home . '/libs/phplib/loxberry_web.php')) {
+        require_once $ev_home . '/libs/phplib/loxberry_web.php';
+    }
+    $ev_p = ev_paths();   // nach dem Einbinden neu holen
 }
 
 /* Wer einen Reiter hinzufuegt, muss DREI Stellen mitziehen: die Reiterleiste,
    den Bereich (sm-seite mit gleicher id) und diese Positivliste. Fehlt der
-   Name hier, springt die Seite nach jedem Absenden zurueck auf Einstellungen. */
+   Name hier, springt die Seite nach jedem Absenden zurueck auf Einstellungen.
+
+   Die Leiste bleibt bewusst AUSGESCHRIEBEN und wird nicht aus ev_reiter()
+   erzeugt: eine PHP-Schleife macht hausstandard_pruefen.py blind, und genau
+   dieser Fehler steht zweimal in REGELN_1. Die Auflaesung ist nicht
+   "Schleife oder Hand", sondern ausschreiben UND die Uebereinstimmung im
+   Reiter Test nachpruefen lassen - das tut jetzt ev_pruefung_reiter(). */
 $ev_muster = '/^tab-(settings|mqtt|loxone|test|log)$/';
 $ev_tab = preg_match($ev_muster, (string) (isset($_POST['activetab']) ? $_POST['activetab'] : ''))
     ? (string) $_POST['activetab'] : 'tab-settings';
@@ -106,6 +130,7 @@ if ($ev_post && isset($_POST['speichern'])) {
 
     $ev_cfg['tarife_ein'] = isset($_POST['tarife_ein']) ? 1 : 0;
     $ev_cfg['steuerung_ein'] = isset($_POST['steuerung_ein']) ? 1 : 0;
+    $ev_cfg['update_ein'] = isset($_POST['update_ein']) ? 1 : 0;
 
     if (!$ev_fehler) {
         if (ev_config_write($ev_cfg)) {
@@ -143,8 +168,8 @@ if ($ev_post && isset($_POST['save_mqtt'])) {
 }
 
 $ev_cfg = ev_config();
-$ev_pfade = ev_paths();
-$ev_plugin = $ev_pfade['plugin'];
+$ev_p = ev_paths();
+$ev_plugin = $ev_p['plugin'];
 
 if (class_exists('LBWeb', false)) {
     LBWeb::lbheader(ev_t('ALLG.TITEL'), 'https://docs.evcc.io/', 'help.html');
@@ -243,19 +268,26 @@ if (class_exists('LBWeb', false)) {
 <?php } ?>
 
 <!-- Reiterleiste: echte Links, JavaScript faengt den Klick ab. Warum beides:
-     Der Link traegt die Adresse - jeder Reiter ist damit verlinkbar, die
-     Zurueck-Taste tut das Erwartete, und faellt das Skript aus, bleibt die
-     Seite bedienbar. -->
+     Der Link traegt die Adresse - jeder Reiter ist damit verlinkbar, und die
+     Zurueck-Taste tut das Erwartete.
+
+     WELCHER REITER OFFEN IST, ENTSCHEIDET DER SERVER. sm-active steht schon
+     im ausgelieferten HTML, an der Leiste UND am Bereich; das Skript schaltet
+     danach nur noch ohne Neuladen um. Bis 0.9.10 war das nicht so: gemessen
+     kam sm-active im ausgelieferten HTML viermal vor, alle vier Male in CSS
+     und JavaScript, kein einziges Mal im Markup. Zusammen mit
+     .sm-seite{display:none} war die Seite ohne JavaScript LEER - und der
+     Kommentar an dieser Stelle behauptete das Gegenteil. -->
 <div class="sm-tabs">
-	<a class="sm-tab" data-ziel="tab-settings" href="index.php?form=settings"><?= ev_e(ev_t('REITER.EINSTELLUNGEN')) ?></a>
-	<a class="sm-tab" data-ziel="tab-mqtt"     href="index.php?form=mqtt"><?= ev_e(ev_t('REITER.MQTT')) ?></a>
-	<a class="sm-tab" data-ziel="tab-loxone"   href="index.php?form=loxone"><?= ev_e(ev_t('REITER.LOXONE')) ?></a>
-	<a class="sm-tab" data-ziel="tab-test"     href="index.php?form=test"><?= ev_e(ev_t('REITER.TEST')) ?></a>
-	<a class="sm-tab" data-ziel="tab-log"      href="index.php?form=log"><?= ev_e(ev_t('REITER.LOG')) ?></a>
+	<a class="sm-tab<?= $ev_tab === 'tab-settings' ? ' sm-active' : '' ?>" data-ziel="tab-settings" href="index.php?form=settings"><?= ev_e(ev_t('REITER.EINSTELLUNGEN')) ?></a>
+	<a class="sm-tab<?= $ev_tab === 'tab-mqtt' ? ' sm-active' : '' ?>" data-ziel="tab-mqtt"     href="index.php?form=mqtt"><?= ev_e(ev_t('REITER.MQTT')) ?></a>
+	<a class="sm-tab<?= $ev_tab === 'tab-loxone' ? ' sm-active' : '' ?>" data-ziel="tab-loxone"   href="index.php?form=loxone"><?= ev_e(ev_t('REITER.LOXONE')) ?></a>
+	<a class="sm-tab<?= $ev_tab === 'tab-test' ? ' sm-active' : '' ?>" data-ziel="tab-test"     href="index.php?form=test"><?= ev_e(ev_t('REITER.TEST')) ?></a>
+	<a class="sm-tab<?= $ev_tab === 'tab-log' ? ' sm-active' : '' ?>" data-ziel="tab-log"      href="index.php?form=log"><?= ev_e(ev_t('REITER.LOG')) ?></a>
 </div>
 
 <!-- ================= Reiter: Einstellungen ================= -->
-<div class="sm-seite" id="tab-settings">
+<div class="sm-seite<?= $ev_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
 
 <?php
 $ev_da = ev_dienst_vorhanden();
@@ -275,6 +307,57 @@ $ev_stand = ev_state();
 <div class="sm-warnung"><?= ev_t('EINST.NICHT_INSTALLIERT') ?></div>
 <?php } ?>
 
+<?php
+/* Die wichtigste Meldung dieser Seite, wenn sie zutrifft.
+   EVCC kann laufen, antworten - und trotzdem nichts liefern, weil es mit
+   einem Startfehler abgebrochen hat. Bis 0.9.12 stand hier nur die Kachel
+   "Verbindung: in Ordnung", und die war sogar richtig. Nur eben nicht die
+   ganze Wahrheit. */
+$ev_ein = ev_einrichtung($ev_stand);
+if ($ev_ein['fatal'] !== '') { ?>
+<div class="sm-fehler"><?= sprintf(ev_t('EINST.EVCC_FATAL'), ev_e($ev_ein['fatal']), ev_e(ev_evcc_link())) ?></div>
+<?php } elseif ($ev_ein['einrichtung'] === 0) { ?>
+<div class="sm-fehler"><?= sprintf(ev_t('EINST.SETUP_NOETIG'), ev_e(ev_evcc_link())) ?></div>
+<?php } elseif ($ev_ein['einrichtung'] === 1 && $ev_ein['ladepunkte'] === 0) { ?>
+<div class="sm-warnung"><?= sprintf(ev_t('EINST.KEIN_LADEPUNKT'), ev_e(ev_evcc_link())) ?></div>
+<?php } ?>
+<?php if ($ev_ein['neuer'] !== '') { ?>
+<div class="sm-hinweis"><?= sprintf(ev_t('EINST.EVCC_NEU' . ev_update_weg()), ev_e($ev_ein['version']), ev_e($ev_ein['neuer'])) ?></div>
+<?php } ?>
+
+<?php
+/* ---- Statistik (Vorschlag E15) ----
+   Kommt aus dem Zwischenspeicher, den der Abrufdienst fuellt - diese Seite
+   stellt dafuer keine eigene Anfrage. Steht dort nichts, wird auch nichts
+   behauptet: dann fehlt der Abschnitt, statt Nullen zu zeigen. */
+$ev_stat = ev_statistik();
+if ($ev_stat) { ?>
+<h2><?= ev_e(ev_t('STAT.H')) ?></h2>
+<p class="sm-hilfe"><?= ev_t('STAT.TEXT') ?></p>
+<table class="sm-tbl">
+<tr><th><?= ev_e(ev_t('STAT.T_ZEITRAUM')) ?></th><th><?= ev_e(ev_t('STAT.T_ENERGIE')) ?></th>
+    <th><?= ev_e(ev_t('STAT.T_SOLAR')) ?></th><th><?= ev_e(ev_t('STAT.T_PREIS')) ?></th>
+    <th><?= ev_e(ev_t('STAT.T_CO2')) ?></th></tr>
+<?php
+$ev_zeitraum = array('30d' => 'STAT.Z_30', '365d' => 'STAT.Z_365', 'total' => 'STAT.Z_GESAMT',
+                     'thisYear' => 'STAT.Z_JAHR');
+foreach ($ev_zeitraum as $ev_k => $ev_s) {
+    if (!isset($ev_stat[$ev_k]) || !is_array($ev_stat[$ev_k])) { continue; }
+    $ev_r = $ev_stat[$ev_k];
+    $ev_z = function ($n, $k, $nach = 1) use ($ev_r) {
+        return isset($ev_r[$k]) && is_numeric($ev_r[$k])
+            ? number_format((float) $ev_r[$k], $nach, ',', '.') : '-';
+    };
+?>
+<tr><td><?= ev_e(ev_t($ev_s)) ?></td>
+    <td><?= $ev_z('e', 'chargedKWh', 1) ?> kWh</td>
+    <td><?= $ev_z('s', 'solarPercentage', 1) ?> %</td>
+    <td><?= $ev_z('p', 'avgPrice', 3) ?></td>
+    <td><?= $ev_z('c', 'avgCo2', 0) ?> g/kWh</td></tr>
+<?php } ?>
+</table>
+<?php } ?>
+
 <form action="index.php" method="post" autocomplete="off">
 <input data-role="none" type="hidden" name="speichern" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-settings">
@@ -284,6 +367,16 @@ $ev_stand = ev_state();
   <label for="url"><?= ev_e(ev_t('EINST.L_URL')) ?></label>
   <input data-role="none" type="text" id="url" name="url" value="<?= ev_e($ev_cfg['url']) ?>" placeholder="http://127.0.0.1:7070">
   <div class="sm-hilfe"><?= ev_t('EINST.H_URL') ?></div>
+<?php
+/* "Es steht hier immer noch 127.0.0.1" - die haeufigste Rueckfrage zu diesem
+   Feld, und der Wert ist richtig: das Plugin laeuft AUF dem LoxBerry und
+   erreicht EVCC ueber die Rueckschleife. Nur anklicken kann man ihn von einem
+   anderen Rechner aus nicht. Deshalb steht der Verweis, der im Browser
+   wirklich traegt, gleich daneben - statt dass man ihn sich zusammensucht. */
+$ev_link = ev_evcc_link();
+if ($ev_link !== $ev_cfg['url']) { ?>
+  <div class="sm-hilfe"><?= sprintf(ev_t('EINST.H_URL_LINK'), ev_e($ev_link)) ?></div>
+<?php } ?>
 </div>
 <div class="sm-feld">
   <label for="passwort"><?= ev_e(ev_t('EINST.L_PASSWORT')) ?></label>
@@ -326,6 +419,16 @@ $ev_stand = ev_state();
   </label>
 </div>
 
+<h2><?= ev_e(ev_t('EINST.H_UPDATE')) ?></h2>
+<div class="sm-warnung"><?= ev_t('EINST.H_UPDATE_TEXT') ?></div>
+<div class="sm-feld">
+  <label style="display:inline-flex;align-items:center;gap:8px;font-weight:600;">
+    <input data-role="none" type="checkbox" name="update_ein" value="1" <?= !empty($ev_cfg['update_ein']) ? 'checked' : '' ?>>
+    <?= ev_e(ev_t('EINST.L_UPDATE')) ?>
+  </label>
+  <div class="sm-hilfe"><?= ev_t('EINST.H_UPDATE_HILFE') ?></div>
+</div>
+
 <?php /* MQTT stand hier bis zu dieser Fassung. Es wohnt jetzt
          vollstaendig im Reiter MQTT - eine Sache, eine Stelle. */ ?>
 
@@ -339,14 +442,21 @@ $ev_stand = ev_state();
 </div>
 
 <!-- ================= Reiter: MQTT ================= -->
-<div class="sm-seite" id="tab-mqtt">
+<div class="sm-seite<?= $ev_tab === 'tab-mqtt' ? ' sm-active' : '' ?>" id="tab-mqtt">
 
-<h2>MQTT</h2>
+<?php /* Hier stand bis 0.9.11 ein fest eingetragenes <h2>MQTT</h2> - und
+         vier Zeilen darunter EINST.H_MQTT, das ebenfalls "MQTT" lautete, und
+         weiter unten MQTT.H_TITEL, das auch "MQTT" lautete. Drei
+         Ueberschriften, dreimal dasselbe Wort. Am Geraet aufgefallen. */ ?>
 <form action="index.php" method="post">
 <input data-role="none" type="hidden" name="save_mqtt" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
 <h2><?= ev_e(ev_t('EINST.H_MQTT')) ?></h2>
-<?php if (!function_exists('ev_hs_autostart')) { function ev_hs_autostart() { $h = getenv('LBHOMEDIR') ?: '/opt/loxberry'; $g = $h . '/config/system/general.json'; if (!is_file($g)) { return null; } $j = json_decode((string) @file_get_contents($g), true); if (!is_array($j) || !isset($j['Mqtt'])) { return null; } return !empty($j['Mqtt']['Gatewayautostart']); } } if (ev_hs_autostart() === false) { ?><div class="sm-alert sm-warn"><b>MQTT:</b> <?php echo ev_t('EINST.W_AUTOSTART'); ?></div><?php } ?>
+<?php /* Hier stand bis 0.9.10 eine zweite, eingebettete Autostart-Pruefung
+         mit hart verdrahtetem /opt/loxberry. Sie las den RICHTIGEN Schluessel
+         (Gatewayautostart), waehrend ev_mqtt_zustand() 21 Zeilen weiter unten
+         den falschen las - zwei Wege fuer dieselbe Frage, einer davon falsch.
+         Jetzt gibt es nur noch ev_mqtt_zustand(), und der stimmt. */ ?>
 <div class="sm-feld">
   <label style="display:inline-flex;align-items:center;gap:8px;font-weight:400;">
     <input data-role="none" type="checkbox" name="mqtt_ein" value="1" <?= !empty($ev_cfg['mqtt_ein']) ? 'checked' : '' ?>>
@@ -396,7 +506,7 @@ $ev_stand = ev_state();
 </div>
 
 <!-- ================= Reiter: Einbindung in Loxone ================= -->
-<div class="sm-seite" id="tab-loxone">
+<div class="sm-seite<?= $ev_tab === 'tab-loxone' ? ' sm-active' : '' ?>" id="tab-loxone">
 
 <h2><?= ev_e(ev_t('LOX.H_EM')) ?></h2>
 <div class="sm-hinweis"><?= ev_t('LOX.EM_EINLEITUNG') ?></div>
@@ -417,19 +527,19 @@ $ev_stand = ev_state();
 <h2><?= ev_e(ev_t('LOX.H_VORLAGE')) ?></h2>
 <div class="sm-hinweis"><?= ev_t('LOX.VORLAGE_TEXT') ?></div>
 <div class="sm-legende">
-<span><i class="sm-punkt sm-b-lesen"></i> <?= ev_t('LEGENDE.LESEN') ?></span>
+<span><i class="sm-punkt sm-b-technik"></i> <?= ev_t('LEGENDE.TECHNIK') ?></span>
 </div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post">
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
   <input data-role="none" type="hidden" name="vorlage" value="ein">
-  <button data-role="none" class="sm-btn sm-b-lesen" type="submit"><?= ev_e(ev_t('LOX.K_VORLAGE_EIN')) ?></button>
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('LOX.K_VORLAGE_EIN')) ?></button>
 </form>
 <?php if (!empty($ev_cfg['steuerung_ein'])) { ?>
 <form action="index.php" method="post">
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
   <input data-role="none" type="hidden" name="vorlage" value="aus">
-  <button data-role="none" class="sm-btn sm-b-lesen" type="submit"><?= ev_e(ev_t('LOX.K_VORLAGE_AUS')) ?></button>
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('LOX.K_VORLAGE_AUS')) ?></button>
 </form>
 <?php } ?>
 </div>
@@ -453,22 +563,31 @@ $ev_stand = ev_state();
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S3_T')) ?></b><br>
 <?= ev_t('LOX.S3') ?>
 <table class="sm-tbl">
-<tr><th><?= ev_e(ev_t('LOX.T_BEFEHL')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th></tr>
-<tr><td><span class="sm-mono">&amp;aktion=modus&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.MODUS') ?> (0=off, 1=now, 2=minpv, 3=pv)</td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=limitsoc&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.LIMITSOC') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=minsoc&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.MINSOC') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=phasen&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.PHASEN') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=minstrom&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.MINSTROM') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=maxstrom&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.MAXSTROM') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=prioritaet&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.PRIORITAET') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=smartcostlimit&amp;lp=1&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.SMARTCOSTLIMIT') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=batterieboost&amp;lp=1&amp;wert=1|0</span></td><td><?= ev_t('AUS.BATTERIEBOOST') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=batteriemodus&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.BATTERIEMODUS') ?> (0=normal, 1=hold, 2=charge)</td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=prioritaetssoc&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.PRIORITAETSSOC') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=puffersoc&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.PUFFERSOC') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=residualleistung&amp;wert=&lt;v.0&gt;</span></td><td><?= ev_t('AUS.RESIDUALLEISTUNG') ?></td></tr>
-<tr><td><span class="sm-mono">&amp;aktion=entladeregelung&amp;wert=1|0</span></td><td><?= ev_t('AUS.ENTLADEREGELUNG') ?></td></tr>
+<tr><th><?= ev_e(ev_t('LOX.T_BEFEHL')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('LOX.T_HERKUNFT')) ?></th></tr>
+<?php
+/* Erzeugt aus ev_befehle() - derselben Quelle, aus der der Endpunkt seine
+   Pruefung und die Vorlage ihre Ausgaenge nimmt. Bis 0.9.10 stand die Liste
+   hier ein drittes Mal von Hand. */
+foreach (ev_befehle() as $ev_a => $ev_b) {
+    $ev_adr = '&amp;aktion=' . $ev_a . ($ev_b['ebene'] === 'lp' ? '&amp;lp=1' : '');
+    if ($ev_b['pruef'] === 'ohne')          { $ev_adr .= ''; }
+    elseif ($ev_b['pruef'] === 'schalter')  { $ev_adr .= '&amp;wert=1|0'; }
+    elseif ($ev_b['pruef'] === 'plan')      { $ev_adr .= '&amp;wert=&lt;v.0&gt;&amp;stunden=&lt;v.1&gt;'; }
+    else                                    { $ev_adr .= '&amp;wert=&lt;v.0&gt;'; }
+    $ev_bed = ev_t($ev_b['text']);
+    if ($ev_a === 'modus')        { $ev_bed .= ' (0=off, 1=now, 2=minpv, 3=pv)'; }
+    if ($ev_a === 'batteriemodus'){ $ev_bed .= ' (0=normal, 1=hold, 2=charge)'; }
+?>
+<tr>
+  <td><span class="sm-mono"><?= $ev_adr ?></span><?= $ev_b['methode'] === 'DELETE' ? ' <b>(DELETE)</b>' : '' ?></td>
+  <td><?= $ev_bed ?></td>
+  <td><?= $ev_b['quelle'] === 'doku'
+        ? '<b>' . ev_e(ev_t('LOX.Q_DOKU')) . '</b>'
+        : ev_e(ev_t('LOX.Q_GEMESSEN')) ?></td>
+</tr>
+<?php } ?>
 </table>
+<div class="sm-warnung"><?= ev_t('LOX.BEFEHLE_DOKU_WARNUNG') ?></div>
 </div>
 <?php } ?>
 
@@ -485,7 +604,14 @@ $ev_stand = ev_state();
 <tr><td><span class="sm-mono">EVCC_TARIF_EINSPEISUNG</span></td><td><?= ev_t('SPOT.Z_EINSPEISUNG') ?></td></tr>
 <tr><td><span class="sm-mono">EVCC_TARIF_CO2</span></td><td><?= ev_t('SPOT.Z_CO2') ?></td></tr>
 <tr><td><span class="sm-mono">EVCC_LP1_SMARTCOST_AKTIV</span></td><td><?= ev_t('SPOT.Z_AKTIV') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_PREIS_MIN_24H</span></td><td><?= ev_t('SPOT.Z_MIN') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_PREIS_MAX_24H</span></td><td><?= ev_t('SPOT.Z_MAX') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_PREIS_SCHNITT_24H</span></td><td><?= ev_t('SPOT.Z_SCHNITT') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_PREIS_RANG</span></td><td><?= ev_t('SPOT.Z_RANG') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_PREIS_STUNDEN</span></td><td><?= ev_t('SPOT.Z_ANZAHL') ?></td></tr>
+<tr><td><span class="sm-mono">EVCC_PREIS_GUENSTIGSTE_STUNDE</span></td><td><?= ev_t('SPOT.Z_BESTE') ?></td></tr>
 </table>
+<div class="sm-hinweis"><?= ev_t('SPOT.RANG_REZEPT') ?></div>
 </div>
 
 <div class="sm-step"><b><?= ev_e(ev_t('SPOT.H_GRENZE')) ?></b><br>
@@ -524,6 +650,38 @@ $ev_stand = ev_state();
 <?= ev_t('DIREKT.ABWAEGUNG') ?>
 </div>
 
+<div class="sm-step"><b><?= ev_e(ev_t('LOX.S_GRUND_T')) ?></b><br>
+<?= ev_t('LOX.S_GRUND') ?>
+<table class="sm-tbl">
+<tr><th><?= ev_e(ev_t('LOX.T_ABLESEN')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th></tr>
+<tr><td><span class="sm-mono">LP1_LAEDT = 1</span></td><td><?= ev_t('LOX.G_LAEDT') ?></td></tr>
+<tr><td><span class="sm-mono">LP1_VERBUNDEN = 0</span></td><td><?= ev_t('LOX.G_KEIN_FZ') ?></td></tr>
+<tr><td><span class="sm-mono">LP1_MODUS_NR = 0</span></td><td><?= ev_t('LOX.G_AUS') ?></td></tr>
+<tr><td><span class="sm-mono">LP1_PV_WARTEN_MIN &gt; 0</span></td><td><?= ev_t('LOX.G_PV') ?></td></tr>
+<tr><td><span class="sm-mono">LP1_PHASEN_WARTEN_MIN &gt; 0</span></td><td><?= ev_t('LOX.G_PHASEN') ?></td></tr>
+<tr><td><span class="sm-mono">LP1_FAHRZEUG_SOC &ge; LP1_LIMIT_SOC</span></td><td><?= ev_t('LOX.G_VOLL') ?></td></tr>
+</table>
+<?= ev_t('LOX.S_GRUND_HINWEIS') ?>
+</div>
+
+<div class="sm-step"><b><?= ev_e(ev_t('LOX.S_AUSFALL_T')) ?></b><br>
+<?= ev_t('LOX.S_AUSFALL') ?>
+<table class="sm-tbl">
+<tr><th><?= ev_e(ev_t('LOX.T_ABLESEN')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th></tr>
+<tr><td><span class="sm-mono">OK</span></td><td><?= ev_t('LOX.A_OK') ?></td></tr>
+<tr><td><span class="sm-mono">ALTER_S</span></td><td><?= ev_t('LOX.A_ALTER') ?></td></tr>
+<tr><td><span class="sm-mono">FEHLER_NR = 0</span></td><td><?= ev_t('LOX.A_NR0') ?></td></tr>
+<tr><td><span class="sm-mono">FEHLER_NR = 1</span></td><td><?= ev_t('LOX.A_NR1') ?></td></tr>
+<tr><td><span class="sm-mono">FEHLER_NR = 2</span></td><td><?= ev_t('LOX.A_NR2') ?></td></tr>
+<tr><td><span class="sm-mono">FEHLER_NR = 3</span></td><td><?= ev_t('LOX.A_NR3') ?></td></tr>
+<tr><td><span class="sm-mono">FEHLER_NR = 4</span></td><td><?= ev_t('LOX.A_NR4') ?></td></tr>
+<tr><td><span class="sm-mono">FEHLER_NR = 5</span></td><td><?= ev_t('LOX.A_NR5') ?></td></tr>
+<tr><td><span class="sm-mono">BETRIEBSBEREIT</span></td><td><?= ev_t('LOX.A_BETRIEBSBEREIT') ?></td></tr>
+<tr><td><span class="sm-mono">DIENST</span></td><td><?= ev_t('LOX.A_DIENST') ?></td></tr>
+</table>
+<div class="sm-warnung"><?= ev_t('LOX.A_WARNUNG') ?></div>
+</div>
+
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S4_T')) ?></b><br>
 <?= ev_t('LOX.S4') ?>
 <table class="sm-tbl">
@@ -533,13 +691,24 @@ $ev_stand = ev_state();
 <tr><td>3</td><td><?= ev_t('BAUSTEIN.B3_TYP') ?></td><td><span class="sm-mono">Wallbox Status</span></td><td><?= ev_t('BAUSTEIN.B3_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B3_VERB') ?></td></tr>
 <tr><td>4</td><td><?= ev_t('BAUSTEIN.B4_TYP') ?></td><td><span class="sm-mono">Ladung fertig</span></td><td><?= ev_t('BAUSTEIN.B4_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B4_VERB') ?></td></tr>
 <tr><td>5</td><td><?= ev_t('BAUSTEIN.B5_TYP') ?></td><td><span class="sm-mono">EVCC stumm</span></td><td><?= ev_t('BAUSTEIN.B5_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B5_VERB') ?></td></tr>
+<tr><td>6</td><td><?= ev_t('BAUSTEIN.B6_TYP') ?></td><td><span class="sm-mono">EVCC Stoerung</span></td><td><?= ev_t('BAUSTEIN.B6_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B6_VERB') ?></td></tr>
+<tr><td>7</td><td><?= ev_t('BAUSTEIN.B7_TYP') ?></td><td><span class="sm-mono">EVCC Meldung</span></td><td><?= ev_t('BAUSTEIN.B7_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B7_VERB') ?></td></tr>
+<tr><td>8</td><td><?= ev_t('BAUSTEIN.B8_TYP') ?></td><td><span class="sm-mono">Guenstige Stunde</span></td><td><?= ev_t('BAUSTEIN.B8_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B8_VERB') ?></td></tr>
+<tr><td>9</td><td><?= ev_t('BAUSTEIN.B9_TYP') ?></td><td><span class="sm-mono">Abfahrtszeit</span></td><td><?= ev_t('BAUSTEIN.B9_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B9_VERB') ?></td></tr>
+<tr><td>10</td><td><?= ev_t('BAUSTEIN.B10_TYP') ?></td><td><span class="sm-mono">Solarprognose</span></td><td><?= ev_t('BAUSTEIN.B10_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B10_VERB') ?></td></tr>
 </table>
 <?= ev_t('LOX.S4_ERLAEUTERUNG') ?>
+</div>
+
+<div class="sm-step"><b><?= ev_e(ev_t('LOX.S_GEGENPROBE_T')) ?></b><br>
+<?= ev_t('LOX.S_GEGENPROBE') ?>
+<div class="sm-pre"><?= ev_e(ev_endpunkt('status')) ?></div>
+<?= ev_t('LOX.S_GEGENPROBE_2') ?>
 </div>
 </div>
 
 <!-- ================= Reiter: Test ================= -->
-<div class="sm-seite" id="tab-test">
+<div class="sm-seite<?= $ev_tab === 'tab-test' ? ' sm-active' : '' ?>" id="tab-test">
 <h2><?= ev_e(ev_t('TEST.H_SELBSTTEST')) ?></h2>
 <p class="sm-hilfe"><?= ev_t('TEST.SELBSTTEST_TEXT') ?></p>
 <?php
@@ -579,7 +748,14 @@ foreach ($ev_pr as $ev_z) { if ($ev_z[0] === 0) { $ev_schlecht++; } }
 
 <div class="sm-knopfreihe">
 <a class="sm-btn sm-b-technik" href="/plugins/<?= ev_e($ev_plugin) ?>/index.php?token=<?= ev_e($ev_cfg['aktionstoken']) ?>&amp;aktion=roh" target="_blank"><?= ev_e(ev_t('TEST.K_ROH')) ?></a>
-<a class="sm-btn sm-b-technik" href="<?= ev_e($ev_cfg['url']) ?>" target="_blank"><?= ev_e(ev_t('TEST.K_EVCC_OBERFLAECHE')) ?></a>
+<a class="sm-btn sm-b-technik" href="/plugins/<?= ev_e($ev_plugin) ?>/index.php?token=<?= ev_e($ev_cfg['aktionstoken']) ?>&amp;aktion=befehle" target="_blank"><?= ev_e(ev_t('TEST.K_BEFEHLE')) ?></a>
+<a class="sm-btn sm-b-technik" href="<?= ev_e(ev_evcc_link()) ?>" target="_blank"><?= ev_e(ev_t('TEST.K_EVCC_OBERFLAECHE')) ?></a>
+<form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <input data-role="none" type="hidden" name="testaktion" value="endpunkt">
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('TEST.K_ENDPUNKT')) ?></button></form>
+<form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <input data-role="none" type="hidden" name="testaktion" value="zusatz">
+  <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('TEST.K_ZUSATZ')) ?></button></form>
 </div>
 
 <div class="sm-knopfreihe">
@@ -595,14 +771,32 @@ foreach ($ev_pr as $ev_z) { if ($ev_z[0] === 0) { $ev_schlecht++; } }
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
   <input data-role="none" type="hidden" name="testaktion" value="token">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_TOKEN')) ?></button></form>
+<?php if (!empty($ev_cfg['update_ein'])) { ?>
+<form action="index.php" method="post"
+      onsubmit="return confirm(<?= ev_e(json_encode(strip_tags(html_entity_decode(ev_t('TEST.K_UPDATE_FRAGE'), ENT_QUOTES, 'UTF-8')))) ?>)">
+  <input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <input data-role="none" type="hidden" name="testaktion" value="update">
+  <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_UPDATE')) ?></button></form>
+<?php } ?>
 </div>
 </div>
 
 <!-- ================= Reiter: Logdateien ================= -->
-<div class="sm-seite" id="tab-log">
+<div class="sm-seite<?= $ev_tab === 'tab-log' ? ' sm-active' : '' ?>" id="tab-log">
 <h2><?= ev_e(ev_t('LOG.H_TITEL')) ?></h2>
 <?php
-$ev_lf = $ev_pfade['log'];
+/* Die Liste des Rahmens zusaetzlich zur eigenen Datei: LoxBerry fuehrt die
+   gedrehten Protokolle und die Loglevel-Einstellung dort. 19 Linien im
+   Bestand tun das; bis 0.9.10 tat EVCC es nicht. Faellt die Funktion aus
+   (Aufruf ausserhalb des Rahmens), bleibt die eigene Anzeige darunter. */
+if (class_exists('LBWeb', false) && method_exists('LBWeb', 'loglist_html')) {
+    $ev_liste = @LBWeb::loglist_html(array('PLUGINNAME' => $ev_plugin, 'ALLPLUGINS' => 0));
+    if (is_string($ev_liste) && trim($ev_liste) !== '') { echo $ev_liste; }
+}
+?>
+<h3><?= ev_e(ev_t('LOG.H_EIGEN')) ?></h3>
+<?php
+$ev_lf = $ev_p['log'];
 $ev_zeilen = is_file($ev_lf) ? array_slice(file($ev_lf, FILE_IGNORE_NEW_LINES) ?: array(), -200) : array();
 ?>
 <?php if (!$ev_zeilen) { ?>

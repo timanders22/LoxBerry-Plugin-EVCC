@@ -2,4 +2,18 @@
 # Minuetlicher Lauf. Der eigentliche Abruf laeuft feiner - siehe ev_abruf.php:
 # das Skript schleift innerhalb der Minute im eingestellten Takt weiter, damit
 # Loxone nicht bis zu 60 s auf neue Werte wartet.
-REPLACELBPBINDIR/ev_abruf.php cron >/dev/null 2>&1
+#
+# WARUM DIE FEHLERAUSGABE NICHT MEHR NACH /dev/null GEHT
+# Bis 0.9.10 stand hier ">/dev/null 2>&1". Genau das hat den Fehler der
+# Fassung 0.9.8 verdeckt: ev_abruf.php brach bei JEDEM Lauf mit
+# "Failed opening required" ab, schrieb das auf die Fehlerausgabe - und die
+# ging ins Nichts. Aufgefallen ist es erst Fassungen spaeter. Seit 0.9.9
+# schreibt der Dienst im Fehlerfall ausdruecklich hin, welche Datei er wo
+# gesucht hat; diese Auskunft wegzuwerfen waere die halbe Korrektur.
+#
+# Die regulaere Ausgabe bleibt still (sonst schreibt der Cron jede Minute),
+# die FEHLERausgabe landet in einer eigenen Datei neben dem Protokoll.
+#
+# Und der Aufruf geht ausdruecklich ueber php: fehlt der Datei einmal das
+# Ausfuehrungsrecht, scheiterte der direkte Aufruf ebenso wortlos.
+php REPLACELBPBINDIR/ev_abruf.php cron >/dev/null 2>>REPLACELBPLOGDIR/cron.err
