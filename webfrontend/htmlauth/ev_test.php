@@ -136,7 +136,12 @@ function ev_pruefungen()
          * der nightly-Kanal eingetragen, und apt nimmt die hoechste Fassung
          * aus allen Quellen. Ein Hinweis, kein Kreuz. */
         $ev_fassung = ev_dienst_version();
+        /* Beide Schreibweisen. Gemessen am 17.08.2026: apt fuehrt
+         * 0.315.0~dev.1786876734+3c25327f7 mit TILDE, 'evcc -v' meldet
+         * dieselbe Fassung als 0.315.0-dev+3c25327f7 mit Bindestrich. Wer
+         * nur eine der beiden prueft, sieht die Haelfte. */
         $ev_dev = (stripos($ev_fassung, '-dev') !== false
+                   || stripos($ev_fassung, '~dev') !== false
                    || stripos($ev_fassung, 'nightly') !== false);
         $z[] = ev_pruefzeile($ev_dev ? -1 : 1, ev_t('TEST.F_INSTALLIERT'),
             sprintf(ev_t($ev_dev ? 'TEST.A_INSTALLIERT_DEV' : 'TEST.A_INSTALLIERT'),

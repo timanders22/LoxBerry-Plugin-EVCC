@@ -9,6 +9,14 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.18
+
+Die Erkennung einer Entwicklerfassung prüfte nur auf `-dev`. Gemessen an
+derselben Fassung schreibt `apt` sie aber als `0.315.0~dev.1786876734+3c25327f7`
+mit **Tilde**, während `evcc -v` sie als `0.315.0-dev+3c25327f7` mit
+Bindestrich meldet. Beide Schreibweisen werden jetzt erkannt — im Skript und im
+Reiter *Test*.
+
 ## Neu in 0.9.17
 
 **Das Update spielte eine Entwicklerfassung ein, ohne es zu sagen.**

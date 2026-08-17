@@ -95,8 +95,10 @@ RC=$?
 
 NACH=$(evcc -v 2>/dev/null | head -1)
 echo "nachher: ${NACH:-unbekannt}"
+# Beide Schreibweisen: apt fuehrt ~dev mit Tilde, 'evcc -v' meldet -dev mit
+# Bindestrich. Gemessen am 17.08.2026 an derselben Fassung.
 case "$NACH" in
-    *-dev*|*nightly*)
+    *-dev*|*~dev*|*nightly*)
         echo "HINWEIS: Das ist eine ENTWICKLERFASSUNG (nightly), keine stabile."
         echo "         Sie stammt aus einer nightly-Quelle in /etc/apt/sources.list.d/."
         echo "         Wer nur stabile Fassungen will, entfernt diese Quelle -"
