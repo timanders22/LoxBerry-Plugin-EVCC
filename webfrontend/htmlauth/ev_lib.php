@@ -125,13 +125,6 @@ function ev_tmpdir()
     return $p['tmp'];
 }
 
-function ev_datadir()
-{
-    $p = ev_paths();
-    if (!is_dir($p['data'])) { @mkdir($p['data'], 0775, true); }
-    return $p['data'];
-}
-
 function ev_log($text)
 {
     $p = ev_paths();
