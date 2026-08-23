@@ -3,7 +3,7 @@
 ARGV3=$3
 ARGV5=$5
 
-SICHER="$ARGV5/data/plugins/$ARGV3/upgrade_sicherung"
+SICHER="$ARGV5/data/plugins/$ARGV3.upgrade_sicherung"
 
 # Der alte Ort wird noch gelesen: wer von 0.9.0 kommt, hat seine Sicherung
 # im preupgrade DIESER Fassung schon am neuen Ort - aber ein abgebrochenes

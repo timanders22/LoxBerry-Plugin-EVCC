@@ -11,7 +11,16 @@ ARGV5=$5
 # Update in der Mitte ab, ist die Ramdisk leer - und mit ihr die einzige
 # Kopie der Zugangsdaten und aller Einstellungen. Genau deshalb liegt sie
 # jetzt unter data/plugins/, also auf der Karte.
-SICHER="$ARGV5/data/plugins/$ARGV3/upgrade_sicherung"
+# Die Sicherung liegt NEBEN dem Ordner, nicht darin. Gemessen an
+# sbin/plugininstall.pl (Zweig master, 23.08.2026): der Installer ruft
+# &purge_installation nicht nur beim Deinstallieren, sondern auch im
+# Upgrade-Zweig (:886), und deren Rumpf loescht ohne jede Bedingung
+# (:1629 ff.) config/plugins/<x>/, bin/plugins/<x>/, data/plugins/<x>/,
+# templates/plugins/<x>/ und beide webfrontend/-Ordner. Eine Sicherung IN
+# data/plugins/<x>/ wird also von genau dem Schritt vernichtet, den sie
+# ueberdauern soll. Der Punkt im Namen ist der ganze Unterschied:
+# "rm -rf .../<x>/" trifft den Nachbarn "<x>.upgrade_sicherung" nicht.
+SICHER="$ARGV5/data/plugins/$ARGV3.upgrade_sicherung"
 
 echo "<INFO> Sichere die Konfiguration"
 mkdir -p "$SICHER"
