@@ -1505,11 +1505,43 @@ function ev_mqtt_zustand()
             if (isset($gen[$k][$ak])) {
                 $out['autostart'] = in_array((string) $gen[$k][$ak],
                     array('1', 'true'), true) ? 1 : 0;
+                /* Die FASSUNG des MQTT-Gateways, ab Werk 1. Sie entscheidet, was der
+                 * Anwender eintragen muss: unter V1 jedes Thema von Hand, ab V2
+                 * erscheint die Themengruppe von selbst in den Subscriptions.
+                 * 0 heisst "nicht feststellbar" - dann wird nichts behauptet,
+                 * sondern es werden beide Faelle genannt. */
+                $out['fassung'] = isset($gen[$k]['Gatewayversion'])
+                    ? (int) $gen[$k]['Gatewayversion'] : 0;
             }
         }
     }
     return $out;
 }
+
+/**
+ * Der Hinweis zum MQTT-Abo - in der Fassung, die zum GATEWAY passt.
+ *
+ * Bis hierher stand an den Ausgabestellen unbedingt "Ohne diesen Eintrag
+ * kommt am Miniserver nichts an". Das gilt fuer Gateway V1, wo jedes Thema
+ * von Hand einzutragen ist. Ab V2 erscheint die Themengruppe von selbst in
+ * den Subscriptions - der Satz schickte jeden V2-Anwender zu einem
+ * Eingabeplatz, den es nicht gibt.
+ *
+ * Drei Ausgaenge, nicht zwei: ist die Fassung nicht feststellbar, werden
+ * BEIDE Faelle genannt statt einer behauptet.
+ */
+function ev_abo_text()
+{
+    $m = ev_mqtt_zustand();
+    $f = isset($m['fassung']) ? (int) $m['fassung'] : 0;
+    if ($f <= 0) {
+        return ev_t('MQTT.ABO_UNBEKANNT');
+    }
+    $gemessen = ' <span class="sm-mono">'
+              . sprintf(ev_t('MQTT.ABO_GEMESSEN'), $f) . '</span>';
+    return ev_t($f >= 2 ? 'MQTT.ABO_V2' : 'MQTT.ABO_WARNUNG') . $gemessen;
+}
+
 
 function ev_mqtt_publish($werte = null)
 {
@@ -2256,3 +2288,42 @@ function ev_selbsttest_endpunkt($aktion = 'status')
                  $code, $erste, $url);
 }
 
+
+/**
+ * Eine Sicherungsdatei einlesen - und dabei NICHTS durchgehen lassen.
+ *
+ * Die sieben Punkte aus REGELN_2, und der wichtigste ist der dritte: eine
+ * halb gueltige Datei ueberschreibt GAR NICHTS. Wer eine Sicherung
+ * zurueckspielt, will entweder den ganzen Stand oder gar keinen - eine zur
+ * Haelfte uebernommene Konfiguration ist schlimmer als die alte, und man
+ * sieht es ihr nicht an.
+ *
+ * Unbekannte Schluessel sind eine Beanstandung, kein stiller Verlust: sie
+ * stammen aus einer anderen Fassung oder einem anderen Plugin.
+ *
+ * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
+ */
+function ev_sicherung_lesen($roh)
+{
+    $mangel = array();
+    $daten = json_decode((string) $roh, true);
+    if (!is_array($daten)) {
+        return array(null, array(ev_t('EINST.SICH_KEIN_JSON')), 0);
+    }
+    $neu = ev_vorgaben();
+    $bekannt = array_keys($neu);
+    $anzahl = 0;
+    foreach ($daten as $k => $w) {
+        if (!in_array($k, $bekannt, true)) {
+            $mangel[] = sprintf(ev_t('EINST.SICH_FREMD'),
+                                 htmlspecialchars((string) $k, ENT_QUOTES, 'UTF-8'));
+            continue;
+        }
+        $neu[$k] = $w;
+        $anzahl++;
+    }
+    if ($anzahl === 0) {
+        $mangel[] = ev_t('EINST.SICH_LEER');
+    }
+    return array($mangel ? null : $neu, $mangel, $anzahl);
+}
