@@ -55,6 +55,23 @@ $ev_meldungen = array();
 $ev_fehler = array();
 $ev_ausgabe = '';
 
+/* ==================================================================
+ * DIE HANDLER STEHEN VOR lbheader() - DAS IST BAUVORSCHRIFT
+ * ==================================================================
+ *
+ * Stand der Kopf davor, war er beim Aufruf von header() schon
+ * geschrieben - "Cannot modify header information", und der Knopf
+ * "Einstellungen sichern" lieferte eine Seite mit angehaengtem JSON
+ * statt einer Datei.
+ *
+ * Am PHP-CLI ist das unsichtbar: header() ist dort wirkungslos und
+ * headers_sent() immer falsch. Und wer OHNE gueltiges Formularmerkmal
+ * misst, wird vom Wachposten abgewiesen, bevor der Handler anlaeuft.
+ * Beides hat den Fehler lange verdeckt.
+ *
+ * Reihenfolge: Bibliothek, Konfiguration, Wachposten, Reiterwahl,
+ * ALLE Handler samt Downloads, dann erst lbheader(), dann HTML.
+ * ================================================================== */
 /* ================= Vorlage herunterladen =================
    Vor jeder Ausgabe, sonst stehen HTML-Reste in der XML-Datei. */
 if ($ev_post && isset($_POST['vorlage'])) {
@@ -171,9 +188,6 @@ $ev_cfg = ev_config();
 $ev_p = ev_paths();
 $ev_plugin = $ev_p['plugin'];
 
-if (class_exists('LBWeb', false)) {
-    LBWeb::lbheader(ev_t('ALLG.TITEL'), 'https://docs.evcc.io/', 'help.html');
-}
 
 /* ---------------- Einstellungen sichern ----------------
  *
@@ -220,6 +234,11 @@ if ($ev_post && isset($_POST['ev_zurueck'])) {
             $ev_fehler[] = ev_t('EINST.SICH_SCHREIBFEHLER');
         }
     }
+}
+
+
+if (class_exists('LBWeb', false)) {
+    LBWeb::lbheader(ev_t('ALLG.TITEL'), 'https://docs.evcc.io/', 'help.html');
 }
 
 ?>
