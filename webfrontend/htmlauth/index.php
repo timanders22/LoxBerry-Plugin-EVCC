@@ -53,6 +53,24 @@ if (isset($_GET['form']) && preg_match($ev_muster, 'tab-' . $_GET['form'])) {
 $ev_post = (isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : '') === 'POST';
 $ev_meldungen = array();
 $ev_fehler = array();
+
+/* ---------------------------------------------------------------- *
+ * Der Wachposten - EIN Posten, vor allen Handlern.
+ * Abgewiesen heisst gemeldet, und es wird NICHTS ausgefuehrt: $_POST
+ * wird geleert, nur der aktive Reiter bleibt stehen, damit der Bediener
+ * nach der Abweisung dort steht, wo er war.
+ * ---------------------------------------------------------------- */
+$ev_wache = ev_wachposten();
+if ($ev_wache !== '') {
+    $ev_reiter_merk = isset($_POST['activetab']) && is_string($_POST['activetab'])
+        ? (string) $_POST['activetab'] : null;
+    $_POST = array();
+    if ($ev_reiter_merk !== null) {
+        $_POST['activetab'] = $ev_reiter_merk;
+    }
+    $ev_fehler[] = $ev_wache;
+}
+
 $ev_ausgabe = '';
 
 /* ==================================================================
@@ -426,6 +444,7 @@ foreach ($ev_zeitraum as $ev_k => $ev_s) {
 <?php } ?>
 
 <form action="index.php" method="post" autocomplete="off">
+  <?php echo ev_fmt(); ?>
 <input data-role="none" type="hidden" name="speichern" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-settings">
 
@@ -517,10 +536,12 @@ if ($ev_link !== $ev_cfg['url']) { ?>
        Wer beides in ein Formular legt, bekommt entweder keinen Upload oder
        einen Download, der das Speichern verschluckt. -->
   <form action="index.php" method="post">
+    <?php echo ev_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <button data-role="none" class="sm-btn sm-b-lesen" type="submit" name="ev_sichern" value="1"><?= ev_t('EINST.K_SICHERN') ?></button>
   </form>
   <form action="index.php" method="post" enctype="multipart/form-data">
+    <?php echo ev_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <input data-role="none" type="file" name="ev_sicherung" accept=".json">
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="ev_zurueck" value="1"><?= ev_t('EINST.K_ZURUECK') ?></button>
@@ -536,6 +557,7 @@ if ($ev_link !== $ev_cfg['url']) { ?>
          weiter unten MQTT.H_TITEL, das auch "MQTT" lautete. Drei
          Ueberschriften, dreimal dasselbe Wort. Am Geraet aufgefallen. */ ?>
 <form action="index.php" method="post">
+  <?php echo ev_fmt(); ?>
 <input data-role="none" type="hidden" name="save_mqtt" value="1">
 <input data-role="none" type="hidden" name="activetab" value="tab-mqtt">
 <h2><?= ev_e(ev_t('EINST.H_MQTT')) ?></h2>
@@ -618,12 +640,14 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 </div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
   <input data-role="none" type="hidden" name="vorlage" value="ein">
   <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('LOX.K_VORLAGE_EIN')) ?></button>
 </form>
 <?php if (!empty($ev_cfg['steuerung_ein'])) { ?>
 <form action="index.php" method="post">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-loxone">
   <input data-role="none" type="hidden" name="vorlage" value="aus">
   <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('LOX.K_VORLAGE_AUS')) ?></button>
@@ -826,9 +850,11 @@ foreach ($ev_pr as $ev_z) { if ($ev_z[0] === 0) { $ev_schlecht++; } }
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ev_e($ev_plugin) ?>/index.php?token=<?= ev_e($ev_cfg['aktionstoken']) ?>&amp;aktion=status" target="_blank"><?= ev_e(ev_t('TEST.K_ZEILE')) ?></a>
 <a class="sm-btn sm-b-lesen" href="/plugins/<?= ev_e($ev_plugin) ?>/index.php?token=<?= ev_e($ev_cfg['aktionstoken']) ?>&amp;aktion=json" target="_blank"><?= ev_e(ev_t('TEST.K_JSON')) ?></a>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="abruf">
   <button data-role="none" class="sm-btn sm-b-lesen" type="submit"><?= ev_e(ev_t('TEST.K_ABRUF')) ?></button></form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="start">
   <button data-role="none" class="sm-btn sm-b-lesen" type="submit"><?= ev_e(ev_t('TEST.K_START')) ?></button></form>
 </div>
@@ -838,29 +864,36 @@ foreach ($ev_pr as $ev_z) { if ($ev_z[0] === 0) { $ev_schlecht++; } }
 <a class="sm-btn sm-b-technik" href="/plugins/<?= ev_e($ev_plugin) ?>/index.php?token=<?= ev_e($ev_cfg['aktionstoken']) ?>&amp;aktion=befehle" target="_blank"><?= ev_e(ev_t('TEST.K_BEFEHLE')) ?></a>
 <a class="sm-btn sm-b-technik" href="<?= ev_e(ev_evcc_link()) ?>" target="_blank"><?= ev_e(ev_t('TEST.K_EVCC_OBERFLAECHE')) ?></a>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="endpunkt">
   <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('TEST.K_ENDPUNKT')) ?></button></form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="zusatz">
   <button data-role="none" class="sm-btn sm-b-technik" type="submit"><?= ev_e(ev_t('TEST.K_ZUSATZ')) ?></button></form>
 </div>
 
 <div class="sm-knopfreihe">
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="restart">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_RESTART')) ?></button></form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="stop">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_STOP')) ?></button></form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="mqtt">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_MQTT')) ?></button></form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="token">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_TOKEN')) ?></button></form>
 <?php if (!empty($ev_cfg['update_ein'])) { ?>
 <form action="index.php" method="post"
       onsubmit="return confirm(<?= ev_e(json_encode(strip_tags(html_entity_decode(ev_t('TEST.K_UPDATE_FRAGE'), ENT_QUOTES, 'UTF-8')))) ?>)">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-test">
   <input data-role="none" type="hidden" name="testaktion" value="update">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_UPDATE')) ?></button></form>
@@ -894,6 +927,7 @@ $ev_zeilen = is_file($ev_lf) ? array_slice(file($ev_lf, FILE_IGNORE_NEW_LINES) ?
 <div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span></div>
 <div class="sm-knopfreihe">
 <form action="index.php" method="post">
+  <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="activetab" value="tab-log">
   <input data-role="none" type="hidden" name="clearlog" value="1">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('LOG.K_LEEREN')) ?></button>
