@@ -100,7 +100,7 @@ function ev_paths()
             'sicherung' => $home . '/config/plugins/' . $plugin . '.backup.evcc.json',
             'sicherung_alt' => $home . '/config/plugins/' . $plugin . '/evcc.backup.json',
             'configdir' => $home . '/config/plugins/' . $plugin,
-            'data'      => $home . '/data/plugins/' . $plugin,
+            'datadir'      => $home . '/data/plugins/' . $plugin,
             'log'       => $home . '/log/plugins/' . $plugin . '/evcc.log',
             'tmp'       => '/tmp/' . $plugin,
         );
@@ -112,7 +112,7 @@ function ev_paths()
         'sicherung' => $eigen . '/config/evcc.backup.json',
         'sicherung_alt' => $eigen . '/config/evcc.backup.json',
         'configdir' => $eigen . '/config',
-        'data' => sys_get_temp_dir() . '/evcc',
+        'datadir' => sys_get_temp_dir() . '/evcc',
         'log' => sys_get_temp_dir() . '/evcc/evcc.log',
         'tmp' => sys_get_temp_dir() . '/evcc',
     );
@@ -2359,7 +2359,7 @@ function ev_merkwort()
         return $wort;
     }
     $pfade = ev_paths();
-    $verz  = isset($pfade['data']) ? $pfade['data'] : '';
+    $verz  = isset($pfade['datadir']) ? $pfade['datadir'] : '';
     if ($verz === '') {
         return '';
     }
