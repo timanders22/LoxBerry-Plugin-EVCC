@@ -130,6 +130,7 @@ function ev_log($text)
     $p = ev_paths();
     $d = dirname($p['log']);
     if (!is_dir($d)) { @mkdir($d, 0775, true); }
+    clearstatcache(true, $p['log']);
     if (is_file($p['log']) && filesize($p['log']) > 512000) {
         // Rotation: die letzten 200 Zeilen behalten.
         $rest = array_slice(file($p['log'], FILE_IGNORE_NEW_LINES) ?: array(), -200);
