@@ -463,6 +463,12 @@ aus der offiziellen Paketquelle installiert.
 
 ## Änderungen
 
+Die Freigabenotiz zu jeder Fassung steht bei den Releases:
+<https://github.com/timanders22/LoxBerry-Plugin-EVCC/releases>
+
+Was hier noch steht, beschreibt einzelne Fassungen ausführlicher, als es auf
+die Release-Seite passt. Maßgeblich ist die Release-Seite.
+
 ### 0.9.1
 
 - **Zustand nach einem Ausfall.** Schlug der Abruf fehl, gab das Plugin den
