@@ -6,8 +6,9 @@
 # loxberry. Alles andere gehoert in postinstall.sh.
 #
 # Argumente: <TEMPFOLDER> <NAME> <FOLDER> <VERSION> <BASEFOLDER>
-ARGV3=$3
-ARGV5=$5
+# Dieses Skript braucht keines davon: es richtet EVCC systemweit ein und
+# fasst den Plugin-Ordner nicht an. Bis 0.9.26 standen hier zwei Zuweisungen,
+# die keine Zeile gelesen hat.
 
 # Die sudo-Regel gehoert VOR jeden Ausstieg.
 #
@@ -163,20 +164,55 @@ case "$BOGEN" in
 esac
 
 echo "<INFO> Trage die EVCC-Paketquelle ein (dl.evcc.io)"
-if ! curl -1sLf 'https://dl.evcc.io/public/evcc/stable/setup.deb.sh' -o /tmp/evcc_setup.deb.sh; then
+# Eigenes Verzeichnis statt eines festen Namens in /tmp. Dieses Skript laeuft
+# als root; ein vorhersagbarer Pfad in einem fuer alle beschreibbaren
+# Verzeichnis laesst sich vorab als Verweis anlegen, und curl -o schriebe
+# dann als root hindurch.
+TMPD=$(mktemp -d) || { echo "<FAIL> Kein Temporaerverzeichnis."; sudo_regel_anlegen; exit 0; }
+SETUP="$TMPD/setup.deb.sh"
+if ! curl -1sLf 'https://dl.evcc.io/public/evcc/stable/setup.deb.sh' -o "$SETUP"; then
+    rm -rf "$TMPD"
     echo "<FAIL> Die Paketquelle liess sich nicht laden. Internetverbindung pruefen."
     echo "<INFO> EVCC kann spaeter von Hand nachinstalliert werden:"
     echo "<INFO>   curl -1sLf https://dl.evcc.io/public/evcc/stable/setup.deb.sh | sudo -E bash"
     echo "<INFO>   sudo apt update && sudo apt install -y evcc"
+    # Die sudo-Regel gehoert VOR JEDEN Ausstieg - auch vor diesen. Bis 0.9.26
+    # fehlte sie an genau den zwei Stellen, an denen das Skript dem Anwender
+    # raet, EVCC von Hand nachzuinstallieren: er haette danach drei
+    # Dienstknoepfe und einen Update-Knopf gehabt, die nicht wirken koennen.
+    sudo_regel_anlegen
     exit 0
 fi
-bash /tmp/evcc_setup.deb.sh
-rm -f /tmp/evcc_setup.deb.sh
+if ! bash "$SETUP"; then
+    echo "<FAIL> Das Einrichtungsskript der Paketquelle ist fehlgeschlagen."
+    rm -rf "$TMPD"
+    sudo_regel_anlegen
+    exit 0
+fi
+rm -rf "$TMPD"
 
 echo "<INFO> Installiere EVCC"
-apt-get update -qq
-if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq evcc; then
+# Nur die soeben eingetragene EVCC-Quelle auffrischen, nicht das ganze
+# System: an einer fremden, kaputten Quelle wuerde sonst die Einrichtung
+# dieses Plugins scheitern - und das geht das Plugin nichts an. Dieselbe
+# Technik wie im Aktualisierungsskript oben, und dort steht die Begruendung
+# seit 0.9.11 im Klartext, waehrend hier bis 0.9.26 das Gegenteil stand.
+EVQ=$(grep -rl 'dl\.evcc\.io' /etc/apt/sources.list.d/ \
+        --include='*.list' --include='*.sources' 2>/dev/null | head -1)
+if [ -n "$EVQ" ]; then
+    apt-get update -qq -o Dir::Etc::sourcelist="$EVQ" \
+                       -o Dir::Etc::sourceparts="-" \
+                       -o APT::Get::List-Cleanup="0" || true
+else
+    apt-get update -qq || true
+fi
+if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+        -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold evcc; then
     echo "<FAIL> Die Installation von EVCC ist fehlgeschlagen. Siehe Protokoll."
+    echo "<INFO> Das Plugin laesst sich trotzdem benutzen: im Reiter Einstellungen"
+    echo "<INFO> die Adresse einer EVCC-Instanz im Netz eintragen."
+    # Auch hier: die sudo-Regel gehoert vor den Ausstieg.
+    sudo_regel_anlegen
     exit 0
 fi
 

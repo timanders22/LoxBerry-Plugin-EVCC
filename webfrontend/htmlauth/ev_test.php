@@ -82,6 +82,17 @@ function ev_reiter_abgleich()
                            $mit_aktiv_seite, count($bereiche));
     }
 
+    /* Ueber die leere Menge wird nicht geurteilt.
+     *
+     * Greift KEINES der drei Suchmuster mehr - etwa nach einer Umbenennung
+     * des Vorsatzes 'tab-' -, sind alle drei Listen leer, die Schleife
+     * darueber laeuft nicht an, und bis 0.9.26 meldete diese Zeile dann
+     * "in Ordnung, 0 Reiter". Gemessen: ein einzelnes zerbrochenes Muster
+     * wird richtig rot, erst alle drei zusammen ergaben den gruenen Haken
+     * ueber nichts. */
+    if (!$liste || !$leiste || !$bereiche) {
+        return array(0, count($leiste), ev_t('TEST.A_REITER_BLIND'));
+    }
     return array($fehlt ? 0 : 1, count($leiste), $fehlt ? implode('; ', $fehlt) : '');
 }
 
@@ -162,10 +173,49 @@ function ev_pruefungen()
      * von Hand installiert hat (ein ausdruecklich unterstuetzter Fall), bekam
      * drei Knoepfe, die nie wirken konnten. Das laesst sich hier ablesen,
      * ohne etwas zu schalten. */
+    /* Gemessen wird die WIRKUNG, nicht das Vorhandensein einer Datei.
+     *
+     * Bis 0.9.26 stand hier ein blosses is_file(): eine vorhandene, aber
+     * falsch geschriebene oder auf einen anderen Pfad zeigende Regel ergab
+     * einen gruenen Haken auf eine Frage, die mit "darf" nach der Wirkung
+     * fragt. 'systemctl is-active' ist ein LESENDER Aufruf, der aber durch
+     * dieselbe sudo-Regel muss - er schaltet nichts und beantwortet die
+     * Frage trotzdem. */
     $sudo = '/etc/sudoers.d/loxberry-evcc';
-    $z[] = ev_pruefzeile(is_file($sudo) ? 1 : (ev_dienst_vorhanden() ? 0 : -1),
-        ev_t('TEST.F_SUDO'),
-        is_file($sudo) ? ev_t('TEST.A_SUDO_OK') : ev_t('TEST.A_SUDO_FEHLT'));
+    $ev_sudo_wirkt = -1;
+    if (function_exists('exec')) {
+        /* 'status' ist der eine LESENDE Unterbefehl, den die sudo-Regel aus
+         * postroot.sh ausdruecklich mit abdeckt. Er schaltet nichts und muss
+         * trotzdem durch dieselbe Regel - damit misst diese Zeile die
+         * Wirkung, ohne eine zu haben. Beide ueblichen Pfade, genau wie
+         * ev_dienst() sie versucht.
+         *
+         * Nicht 'is-active': das steht NICHT in der Regel und waere auf jeder
+         * richtig eingerichteten Anlage rot geworden. */
+        foreach (array('/bin/systemctl', '/usr/bin/systemctl') as $ev_sc) {
+            $ev_aus = array();
+            $ev_rc = 1;
+            @exec('sudo -n ' . $ev_sc . ' status evcc 2>&1', $ev_aus, $ev_rc);
+            $ev_txt = strtolower(implode(' ', $ev_aus));
+            if (strpos($ev_txt, 'password') !== false || strpos($ev_txt, 'sudo:') !== false) {
+                $ev_sudo_wirkt = 0;      // sudo verlangt etwas - die Regel greift nicht
+                continue;                // der andere Pfad darf es noch richten
+            }
+            // 0 = laeuft, 3 = angehalten. Beides heisst: die Regel hat
+            // getragen. 4 (Unit unbekannt) und 127 (kein systemctl) sagen
+            // ueber die Regel nichts - dann bleibt es bei "nicht feststellbar".
+            if ($ev_rc === 0 || $ev_rc === 3) { $ev_sudo_wirkt = 1; break; }
+        }
+    }
+    if ($ev_sudo_wirkt === 1) {
+        $z[] = ev_pruefzeile(1, ev_t('TEST.F_SUDO'), ev_t('TEST.A_SUDO_WIRKT'));
+    } elseif ($ev_sudo_wirkt === 0) {
+        $z[] = ev_pruefzeile(0, ev_t('TEST.F_SUDO'),
+            is_file($sudo) ? ev_t('TEST.A_SUDO_DA_WIRKT_NICHT') : ev_t('TEST.A_SUDO_FEHLT'));
+    } else {
+        $z[] = ev_pruefzeile(-1, ev_t('TEST.F_SUDO'),
+            is_file($sudo) ? ev_t('TEST.A_SUDO_UNKLAR_DA') : ev_t('TEST.A_SUDO_UNKLAR'));
+    }
 
     /* ---- Kann die Oberflaeche EVCC aktualisieren? ----
      * Ein Hinweis, kein Kreuz: wer die Option nicht eingeschaltet hat,
@@ -338,11 +388,24 @@ function ev_pruefungen()
             sprintf(ev_t('TEST.A_MQTT_OK'), (int) $m['udpport'], ev_e($cfg['mqtt_topic'])));
     }
 
-    /* ---- Token und Steuerung ---- */
-    $z[] = ev_pruefzeile(preg_match('/^[A-Za-z0-9]{24,}$/', (string) $cfg['aktionstoken']) ? 1 : 0,
-        ev_t('TEST.F_TOKEN'),
-        preg_match('/^[A-Za-z0-9]{24,}$/', (string) $cfg['aktionstoken'])
-            ? ev_t('TEST.A_TOKEN_OK') : ev_t('TEST.A_TOKEN_FEHLT'));
+    /* ---- Token und Steuerung ----
+     *
+     * Drei Ausgaenge, und kein Mustervergleich mehr. Bis 0.9.26 stand hier
+     * '^[A-Za-z0-9]{24,}$' - dasselbe zu enge Muster, das ev_config() dazu
+     * gebracht hat, ein hinterlegtes Token stillschweigend zu ersetzen. Ein
+     * von Hand gesetztes oder aus einer Sicherung zurueckgespieltes Token
+     * taugt; es ist nur schwaecher als ein selbst erzeugtes. Gemeldet wird
+     * das, abgewiesen nicht. */
+    $ev_tok = (string) $cfg['aktionstoken'];
+    if ($ev_tok === '') {
+        $z[] = ev_pruefzeile(0, ev_t('TEST.F_TOKEN'), ev_t('TEST.A_TOKEN_LEER'));
+    } elseif (strlen($ev_tok) < 24) {
+        $z[] = ev_pruefzeile(-1, ev_t('TEST.F_TOKEN'),
+            sprintf(ev_t('TEST.A_TOKEN_KURZ'), strlen($ev_tok)));
+    } else {
+        $z[] = ev_pruefzeile(1, ev_t('TEST.F_TOKEN'),
+            sprintf(ev_t('TEST.A_TOKEN_OK'), strlen($ev_tok)));
+    }
 
     $z[] = ev_pruefzeile(-1, ev_t('TEST.F_STEUERUNG'),
         !empty($cfg['steuerung_ein']) ? ev_t('TEST.A_STEUERUNG_EIN') : ev_t('TEST.A_STEUERUNG_AUS'));
@@ -394,9 +457,91 @@ function ev_pruefungen()
     foreach (array_keys($felder) as $n) {
         if (preg_match('/^fz[0-9]+_/', $n)) { $fz_ist++; }
     }
-    $z[] = ev_pruefzeile($fz_ist === $fz_soll ? 1 : 0, ev_t('TEST.F_VORLAGE_STABIL'),
-        $fz_ist === $fz_soll ? sprintf(ev_t('TEST.A_VORLAGE_STABIL_OK'), $fz_ist)
-                             : sprintf(ev_t('TEST.A_VORLAGE_STABIL_FEHL'), $fz_ist, $fz_soll));
+    /* Bei null eingestellten Fahrzeugen gibt es nichts zu vergleichen -
+     * "0 === 0" waere ein Haken ueber einer nicht gestellten Frage. */
+    if ((int) $cfg['fahrzeuge'] === 0) {
+        $z[] = ev_pruefzeile(-1, ev_t('TEST.F_VORLAGE_STABIL'),
+            ev_t('TEST.A_VORLAGE_STABIL_KEINE'));
+    } else {
+        $z[] = ev_pruefzeile($fz_ist === $fz_soll ? 1 : 0, ev_t('TEST.F_VORLAGE_STABIL'),
+            $fz_ist === $fz_soll ? sprintf(ev_t('TEST.A_VORLAGE_STABIL_OK'), $fz_ist)
+                                 : sprintf(ev_t('TEST.A_VORLAGE_STABIL_FEHL'), $fz_ist, $fz_soll));
+    }
+
+    /* ---- Sind die Bausteintitel ueber BEIDE Vorlagen eindeutig? ----
+     *
+     * In der Bausteinsuche von Loxone Config fehlt der Geraeteknoten;
+     * Eingaenge und Ausgaenge stehen dort nebeneinander. Gemessen an 0.9.26:
+     * 141 Titel, davon 140 verschieden - das Feld 'entladeregelung' und der
+     * gleichnamige Befehl ergaben zweimal EVCC_ENTLADEREGELUNG. Gefunden hat
+     * das keine Pruefung, sondern ein Abgleich von Hand. Seit 0.9.27 tragen
+     * die Ausgangstitel den Vorsatz SET_; diese Zeile sorgt dafuer, dass es
+     * beim naechsten neuen Feld auffaellt und nicht wieder erst hinterher. */
+    $ev_titel = array();
+    foreach (array(ev_vorlage_ein(), ev_vorlage_aus()) as $ev_paar) {
+        if (preg_match_all('/<VirtualIn(?:Http)?Cmd Title="([^"]*)"/', $ev_paar[1], $ev_m)) {
+            $ev_titel = array_merge($ev_titel, $ev_m[1]);
+        }
+        if (preg_match_all('/<VirtualOutCmd Title="([^"]*)"/', $ev_paar[1], $ev_m)) {
+            $ev_titel = array_merge($ev_titel, $ev_m[1]);
+        }
+    }
+    $ev_doppelt = array();
+    foreach (array_count_values($ev_titel) as $ev_t1 => $ev_c) {
+        if ($ev_c > 1) { $ev_doppelt[] = $ev_t1 . ' (' . $ev_c . 'x)'; }
+    }
+    if (!$ev_titel) {
+        $z[] = ev_pruefzeile(-1, ev_t('TEST.F_TITEL'), ev_t('TEST.A_TITEL_LEER'));
+    } else {
+        $z[] = ev_pruefzeile($ev_doppelt ? 0 : 1, ev_t('TEST.F_TITEL'),
+            $ev_doppelt ? sprintf(ev_t('TEST.A_TITEL_DOPPELT'), ev_e(implode(', ', $ev_doppelt)))
+                        : sprintf(ev_t('TEST.A_TITEL_OK'), count($ev_titel)));
+    }
+
+    /* ---- Stehen die spaeter hinzugekommenen Felder am Ende? ----
+     *
+     * Bis 0.9.26 nicht: gemessen gegen das Tag-Archiv v0.9.10 sassen 59 neue
+     * Felder ab Stelle 11, und 40 alte standen dahinter. Geschadet hat es
+     * nicht, weil die Befehlserkennung namensbasiert ist - aber jede spaetere
+     * Umsortierung waere teuer geworden. Seit 0.9.27 ist die Tabelle geteilt,
+     * und diese Zeile haelt sie so. */
+    $ev_reihe_fehler = array();
+    $ev_spaeter_gesehen = '';
+    foreach ($felder as $ev_n => $ev_d) {
+        $ev_seit = isset($ev_d['seit']) ? (string) $ev_d['seit'] : '0.9.10';
+        if ($ev_seit !== '0.9.10') {
+            $ev_spaeter_gesehen = $ev_n;
+        } elseif ($ev_spaeter_gesehen !== '') {
+            $ev_reihe_fehler[] = $ev_n;
+        }
+        // Ein Feld aus der Dokumentation kann nicht seit 0.9.10 dastehen.
+        if ($ev_d['quelle'] === 'doku' && $ev_seit === '0.9.10') {
+            $ev_reihe_fehler[] = $ev_n;
+        }
+    }
+    if (!$felder) {
+        $z[] = ev_pruefzeile(-1, ev_t('TEST.F_REIHE'), ev_t('TEST.A_REIHE_LEER'));
+    } else {
+        $z[] = ev_pruefzeile($ev_reihe_fehler ? 0 : 1, ev_t('TEST.F_REIHE'),
+            $ev_reihe_fehler
+                ? sprintf(ev_t('TEST.A_REIHE_FEHL'),
+                          ev_e(implode(', ', array_slice(array_unique($ev_reihe_fehler), 0, 6))))
+                : sprintf(ev_t('TEST.A_REIHE_OK'), count($felder)));
+    }
+
+    /* ---- Hat jede Einstellung eine Regel fuer das Zurueckspielen? ----
+     *
+     * ev_wert_pruefen() faellt geschlossen aus: ein Schluessel ohne Regel
+     * wird beim Zurueckspielen abgelehnt. Das ist richtig - aber wer eine
+     * neue Vorgabe ergaenzt und die Regel vergisst, braeche damit still das
+     * Zurueckspielen. Diese Zeile findet das, bevor es ein Anwender tut. */
+    $ev_ohne_regel = array();
+    foreach (ev_vorgaben() as $ev_k => $ev_v) {
+        if (!ev_wert_pruefen($ev_k, $ev_v)) { $ev_ohne_regel[] = $ev_k; }
+    }
+    $z[] = ev_pruefzeile($ev_ohne_regel ? 0 : 1, ev_t('TEST.F_SICH_REGELN'),
+        $ev_ohne_regel ? sprintf(ev_t('TEST.A_SICH_REGELN_FEHL'), ev_e(implode(', ', $ev_ohne_regel)))
+                       : sprintf(ev_t('TEST.A_SICH_REGELN_OK'), count(ev_vorgaben())));
 
     /* ---- Vorlage und Zeile muessen dieselben Feldnamen kennen ----
      *
@@ -455,9 +600,28 @@ function ev_test_aktion($was)
              * aus einem Platzhalter erzeugen lassen. */
             list($ok, $text) = ev_dienst($was);
             $ev_s = strtoupper($was);
-            return array($ok,
-                $ok ? ev_t('TEST.M_DIENST_' . $ev_s)
-                    : sprintf(ev_t('TEST.M_DIENST_' . $ev_s . '_FEHL'), ev_e($text)));
+            if (!$ok) {
+                return array(0, sprintf(ev_t('TEST.M_DIENST_' . $ev_s . '_FEHL'), ev_e($text)));
+            }
+            /* systemctl liefert 0, sobald die Unit angestossen ist - nicht,
+             * sobald sie laeuft. Bis 0.9.26 meldete die Oberflaeche deshalb
+             * "Der EVCC-Dienst wurde gestartet", auch wenn EVCC sofort wieder
+             * umfiel. Fuer die Aktualisierung liest dasselbe Plugin die
+             * Fassung vor und nach dem Lauf nach; hier wird ebenso die
+             * Wirkung gemessen. Eine Sekunde Luft, damit systemd den Start
+             * vollziehen kann. */
+            if ($was !== 'stop') {
+                sleep(1);
+                if (!ev_dienst_laeuft()) {
+                    return array(0, ev_t('TEST.M_DIENST_OHNE_WIRKUNG'));
+                }
+            } else {
+                sleep(1);
+                if (ev_dienst_laeuft()) {
+                    return array(0, ev_t('TEST.M_DIENST_LAEUFT_NOCH'));
+                }
+            }
+            return array(1, ev_t('TEST.M_DIENST_' . $ev_s));
 
         case 'abruf':
             $st = ev_state(true);
@@ -476,10 +640,17 @@ function ev_test_aktion($was)
             return ev_update_ausfuehren();
 
         case 'zusatz':
-            // Preisvorschau, Prognose und Statistik von Hand nachziehen.
-            ev_state(true);
+            /* Preisvorschau, Prognose und Statistik von Hand nachziehen.
+             *
+             * Der Rueckgabewert von ev_state() entscheidet. Bis 0.9.26 stand
+             * hier eine feste 1: auch wenn EVCC gar nicht antwortete,
+             * erschien der gruene Kasten "Zusatzwerte geholt". */
+            $ev_st = ev_state(true);
             ev_zusatz_holen(true);
             $roh = ev_statistik();
+            if (empty($ev_st['ok'])) {
+                return array(0, sprintf(ev_t('TEST.M_ZUSATZ_FEHL'), ev_e((string) $ev_st['fehler'])));
+            }
             return array(1, sprintf(ev_t('TEST.M_ZUSATZ'), $roh ? count($roh) : 0));
 
         case 'endpunkt':

@@ -46,6 +46,7 @@ done
 # Verschaerfend: ev_config() holt genau diese Datei bei einer NEUinstallation
 # stillschweigend zurueck. Eine saubere Neuinstallation war damit keine.
 for datei in "$LBHOME/config/plugins/$PDIR.backup.evcc.json" \
+             "$LBHOME/config/plugins/$PDIR.backup.evcc.json.neu" \
              "$LBHOME/config/plugins/$PDIR/evcc.backup.json" \
              "$LBHOME/config/plugins/$PDIR/evcc.json.kaputt"; do
     if [ -f "$datei" ]; then
@@ -82,8 +83,15 @@ echo "<INFO> Konfiguration und Datenbank liegen in /etc/evcc.yaml und /var/lib/e
 # data/plugins/<ordner>.upgrade_sicherung liegt AUSSERHALB des Ordners, den
 # LoxBerry beim Deinstallieren loescht - genau deshalb uebersteht er ein
 # Update. Wer ihn hier nicht abraeumt, laesst Zugangsdaten liegen.
-UN_FOLDER="${3:-}"
-UN_BASE="${5:-$LBHOMEDIR}"
+# $PDIR und $LBHOME oben sind sorgfaeltig hergeleitet - mit drei
+# Rueckfallebenen. Bis 0.9.26 stand hier stattdessen "${3:-}" und
+# "${5:-$LBHOMEDIR}": der Kopf dieser Datei kennt genau EIN Argument, also
+# war $3 leer, die Bedingung darunter falsch, und die Zeile lief nie. Liegen
+# blieb dann data/plugins/<ordner>.upgrade_sicherung/evcc.json - mit dem
+# EVCC-Passwort im Klartext und dem Token des unangemeldeten Endpunkts,
+# waehrend die Meldung oben sagt, beides sei geloescht.
+UN_FOLDER="${3:-$PDIR}"
+UN_BASE="${5:-$LBHOME}"
 if [ -n "$UN_FOLDER" ] && [ -n "$UN_BASE" ] && [ -d "$UN_BASE/data/plugins" ]; then
     rm -rf "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung" 2>/dev/null
 fi

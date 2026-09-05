@@ -40,9 +40,9 @@ if ($ev_home !== '' && file_exists($ev_home . '/libs/phplib/loxberry_system.php'
 
    Die Leiste bleibt bewusst AUSGESCHRIEBEN und wird nicht aus ev_reiter()
    erzeugt: eine PHP-Schleife macht hausstandard_pruefen.py blind, und genau
-   dieser Fehler steht zweimal in REGELN_1. Die Auflaesung ist nicht
+   dieser Fehler steht zweimal in REGELN_1. Die Aufloesung ist nicht
    "Schleife oder Hand", sondern ausschreiben UND die Uebereinstimmung im
-   Reiter Test nachpruefen lassen - das tut jetzt ev_pruefung_reiter(). */
+   Reiter Test nachpruefen lassen - das tut ev_reiter_abgleich(). */
 $ev_muster = '/^tab-(settings|mqtt|loxone|test|log)$/';
 $ev_tab = preg_match($ev_muster, (string) (isset($_POST['activetab']) ? $_POST['activetab'] : ''))
     ? (string) $_POST['activetab'] : 'tab-settings';
@@ -70,8 +70,6 @@ if ($ev_wache !== '') {
     }
     $ev_fehler[] = $ev_wache;
 }
-
-$ev_ausgabe = '';
 
 /* ==================================================================
  * DIE HANDLER STEHEN VOR lbheader() - DAS IST BAUVORSCHRIFT
@@ -129,11 +127,24 @@ if ($ev_post && isset($_POST['speichern'])) {
         $ev_cfg['url'] = rtrim($ev_url, '/');
     }
 
-    // Das Passwort wird NICHT gefiltert - es darf Sonderzeichen enthalten.
-    // Ein leeres Feld loescht nichts: sonst waere das Passwort nach jedem
-    // Speichern weg, weil es aus Sicherheitsgruenden nicht angezeigt wird.
-    if (isset($_POST['passwort']) && (string) $_POST['passwort'] !== '') {
-        $ev_cfg['passwort'] = (string) $_POST['passwort'];
+    /* Das Passwort wird NICHT auf einen Zeichenvorrat eingeschraenkt - es
+     * darf Sonderzeichen enthalten. Aber Steuerzeichen kommen heraus.
+     *
+     * Es geht als 'Authorization: Bearer ...' in eine HTTP-Kopfzeile, und
+     * der Ersatzweg ohne php-curl setzt die Kopfzeilen mit "\r\n"
+     * zusammen. Gemessen an 0.9.26: ein Passwort mit CRLF erzeugte dort
+     * eine VIERTE Kopfzeile. Das ist die Hausform - nichts hart filtern,
+     * aber Steuerzeichen und Leerraum an den Raendern entfernen.
+     *
+     * Ein leeres Feld loescht nichts: sonst waere das Passwort nach jedem
+     * Speichern weg, weil es aus Sicherheitsgruenden nicht angezeigt wird. */
+    if (isset($_POST['passwort']) && is_string($_POST['passwort'])) {
+        $ev_pw = trim(preg_replace('/[\x00-\x1F\x7F]/', '', (string) $_POST['passwort']));
+        if ($ev_pw !== (string) $_POST['passwort'] && (string) $_POST['passwort'] !== '') {
+            $ev_fehler[] = ev_t('EINST.FEHLER_PASSWORT_ZEICHEN');
+        } elseif ($ev_pw !== '') {
+            $ev_cfg['passwort'] = $ev_pw;
+        }
     }
     if (!empty($_POST['passwort_loeschen'])) { $ev_cfg['passwort'] = ''; }
 
@@ -197,6 +208,13 @@ if ($ev_post && isset($_POST['save_mqtt'])) {
     if (!$ev_fehler) {
         if (ev_config_write($ev_mcfg)) {
             $ev_meldungen[] = ev_t('EINST.GESPEICHERT');
+        } else {
+            // Bis 0.9.26 fehlte dieser Zweig: schlug das Schreiben fehl
+            // (Rechte, volle Karte), kam weder Erfolgs- noch Fehlermeldung
+            // zurueck, die Seite lud neu und zeigte den alten Wert. Der
+            // Bediener haelt das fuer einen Bedienfehler und versucht es
+            // wieder. Die beiden Schwesterhandler haben den Zweig laengst.
+            $ev_fehler[] = sprintf(ev_t('EINST.FEHLER_SPEICHERN'), ev_e(ev_paths()['config']));
         }
     }
     $ev_tab = 'tab-mqtt';
@@ -214,7 +232,18 @@ $ev_plugin = $ev_p['plugin'];
  * kaeme trotzdem nicht an die Anlage; die Datei waere wertlos. Damit
  * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das. */
 if ($ev_post && isset($_POST['ev_sichern'])) {
-    $ev_js = json_encode(ev_config(),
+    /* Ein lesbarer Kopf voran - Hausstandard. Er sagt dem, der die Datei ein
+     * Jahr spaeter in der Hand hat, woher sie stammt und was in ihr steckt.
+     * Die Schluessel beginnen mit einem Unterstrich; ev_sicherung_lesen()
+     * uebergeht genau diese und beanstandet sie nicht (bis 0.9.26 haette es
+     * die eigene Datei damit abgelehnt). */
+    $ev_sich = array(
+        '_hinweis' => 'Sicherung des LoxBerry-Plugins EVCC. Enthaelt das '
+                    . 'Aktionstoken dieser Anlage und gegebenenfalls das '
+                    . 'EVCC-Passwort - wie ein Passwort behandeln.',
+        '_stand'   => date('Y-m-d H:i:s'),
+    ) + ev_config();
+    $ev_js = json_encode($ev_sich,
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($ev_js !== false) {
         header('Content-Type: application/json; charset=utf-8');
@@ -236,7 +265,7 @@ if ($ev_post && isset($_POST['ev_zurueck'])) {
         || !isset($_FILES['ev_sicherung']['tmp_name'])
         || !@is_uploaded_file($_FILES['ev_sicherung']['tmp_name'])) {
         $ev_fehler[] = ev_t('EINST.SICH_KEINE_DATEI');
-    } elseif ((int) $_FILES['ev_sicherung']['size'] > 262144) {
+    } elseif ((int) $_FILES['ev_sicherung']['size'] > 65536) {
         $ev_fehler[] = ev_t('EINST.SICH_ZU_GROSS');
     } else {
         list($ev_neu, $ev_mangel, $ev_n) = ev_sicherung_lesen(
@@ -332,11 +361,12 @@ if (class_exists('LBWeb', false)) {
 .sm-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .sm-row > div { flex: 1; min-width: 200px; }
 
-/* Nachgetragene Definitionen (CSS-Luecken-Durchgang 13.08.2026):
-   benutzt, aber nie definiert - wortgleich aus der Hausstandard-Vorlage
-   bzw. der Referenzimplementierung uebernommen. */
-.sm-alert { border-radius: 8px; padding: 10px 14px; margin: 12px 0; }
-.sm-warn { background: #fdf3e3; border: 1px solid #e0620d; }
+/* Nachgetragen im CSS-Luecken-Durchgang 13.08.2026, weil sie damals
+   benutzt, aber nicht definiert waren. Gemessen am 04.09.2026: benutzt
+   werden sie inzwischen nirgends mehr - die Warnkaesten dieser Oberflaeche
+   heissen durchgehend sm-warnung. Zwei Regeln, die niemand anwendet, mit
+   einer Begruendung, die das Gegenteil behauptet, kosten bei der naechsten
+   Durchsicht Zeit; deshalb sind sie fort. */
 </style>
 
 <div class="sm-wrap">
@@ -518,9 +548,12 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 <?php /* MQTT stand hier bis zu dieser Fassung. Es wohnt jetzt
          vollstaendig im Reiter MQTT - eine Sache, eine Stelle. */ ?>
 
+<?php /* Die Legende nennt genau die Farben, die in DIESER Knopfreihe
+         vorkommen. Bis 0.9.26 stand hier Orange und Gruen ueber einer Reihe
+         mit einem einzigen orangen Knopf; der gruene Knopf stand zwoelf
+         Zeilen tiefer unter eigener Ueberschrift ganz ohne Legende. */ ?>
 <div class="sm-legende">
 <span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span>
-<span><i class="sm-punkt sm-b-lesen"></i> <?= ev_t('LEGENDE.LESEN') ?></span>
 </div>
 <div class="sm-knopfreihe">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('ALLG.SPEICHERN')) ?></button>
@@ -530,6 +563,10 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 <h2><?= ev_t('EINST.H_SICHERUNG') ?></h2>
 <div class="sm-hinweis"><?= ev_t('EINST.SICH_ERKLAERUNG') ?></div>
 <div class="sm-warnung"><?= ev_t('EINST.SICH_WARNUNG') ?></div>
+<div class="sm-legende">
+<span><i class="sm-punkt sm-b-lesen"></i> <?= ev_t('LEGENDE.LESEN') ?></span>
+<span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span>
+</div>
 <div class="sm-knopfreihe">
   <!-- ZWEI GETRENNTE Formulare. Das Sichern schickt einen Download und ruft
        exit auf; das Zurueckspielen braucht enctype="multipart/form-data".
@@ -673,6 +710,12 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 <?php if (!empty($ev_cfg['steuerung_ein'])) { ?>
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S3_T')) ?></b><br>
 <?= ev_t('LOX.S3') ?>
+<?php /* Die Adresse gehoert hierher, nicht in Schritt 1. Bis 0.9.26 sagte
+         der Satz "ein virtueller Ausgang mit DIESER Adresse", und es folgte
+         unmittelbar die Tabelle mit den blossen &aktion=-Anhaengseln - das
+         Bezugsobjekt fehlte, und der Anwender musste sich Basis und Token
+         aus Schritt 1 zusammenklauben. */ ?>
+<div class="sm-pre"><?= ev_e(ev_endpunkt('', true)) ?></div>
 <table class="sm-tbl">
 <tr><th><?= ev_e(ev_t('LOX.T_BEFEHL')) ?></th><th><?= ev_e(ev_t('LOX.T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('LOX.T_HERKUNFT')) ?></th></tr>
 <?php
@@ -692,9 +735,15 @@ foreach (ev_befehle() as $ev_a => $ev_b) {
 <tr>
   <td><span class="sm-mono"><?= $ev_adr ?></span><?= $ev_b['methode'] === 'DELETE' ? ' <b>(DELETE)</b>' : '' ?></td>
   <td><?= $ev_bed ?></td>
-  <td><?= $ev_b['quelle'] === 'doku'
-        ? '<b>' . ev_e(ev_t('LOX.Q_DOKU')) . '</b>'
-        : ev_e(ev_t('LOX.Q_GEMESSEN')) ?></td>
+  <?php /* Eine Zuordnung, kein zweiwertiger Ausdruck: kaeme eine dritte
+           Herkunft dazu, behauptete "sonst gemessen" etwas Falsches - genau
+           das ist bei den Auto-Plugins am 20.08.2026 passiert. Was die
+           Zuordnung nicht kennt, wird beim Namen genannt. */
+     $ev_q = array('doku'    => '<b>' . ev_e(ev_t('LOX.Q_DOKU')) . '</b>',
+                   'bestand' => ev_e(ev_t('LOX.Q_GEMESSEN')));
+     ?>
+  <td><?= isset($ev_q[$ev_b['quelle']]) ? $ev_q[$ev_b['quelle']]
+          : ev_e((string) $ev_b['quelle']) ?></td>
 </tr>
 <?php } ?>
 </table>
@@ -823,13 +872,29 @@ foreach (ev_befehle() as $ev_a => $ev_b) {
 <h2><?= ev_e(ev_t('TEST.H_SELBSTTEST')) ?></h2>
 <p class="sm-hilfe"><?= ev_t('TEST.SELBSTTEST_TEXT') ?></p>
 <?php
+/* Drei Zaehler, nicht zwei.
+ *
+ * Bis 0.9.26 stand hier "count - schlecht" als Zahl der bestandenen
+ * Pruefungen; "nicht feststellbar" zaehlte damit als bestanden. Gemessen am
+ * 04.09.2026: 24 Zeilen, davon 12 Haken, 8 Hinweise und 4 Kreuze - ausgegeben
+ * wurde "20 von 24 bestanden". Faellt das letzte Kreuz weg, stuende dort
+ * "24 von 24", obwohl ein Drittel nichts gemessen hat. Das ist wortwoertlich
+ * der Vorfall vom 17.08.2026 ("22 von 22"), aus dem die Hausregel entstanden
+ * ist: eine Zusammenfassung darf nicht besser aussehen als ihr schlechtester
+ * Punkt. */
 $ev_pr = ev_pruefungen();
+$ev_gut = 0;
+$ev_hinweis = 0;
 $ev_schlecht = 0;
-foreach ($ev_pr as $ev_z) { if ($ev_z[0] === 0) { $ev_schlecht++; } }
+foreach ($ev_pr as $ev_z) {
+    if ($ev_z[0] === 1)      { $ev_gut++; }
+    elseif ($ev_z[0] === 0)  { $ev_schlecht++; }
+    else                     { $ev_hinweis++; }
+}
 ?>
 <div class="<?= $ev_schlecht ? 'sm-warnung' : 'sm-hinweis' ?>">
 <?= sprintf(ev_t($ev_schlecht ? 'TEST.SELBSTTEST_FEHL' : 'TEST.SELBSTTEST_OK'),
-            count($ev_pr) - $ev_schlecht, count($ev_pr)) ?>
+            $ev_gut, $ev_hinweis, $ev_schlecht, count($ev_pr)) ?>
 </div>
 <table class="sm-tbl">
 <tr><th style="width:34px;">&nbsp;</th><th><?= ev_e(ev_t('TEST.T_FRAGE')) ?></th><th><?= ev_e(ev_t('TEST.T_ANTWORT')) ?></th></tr>

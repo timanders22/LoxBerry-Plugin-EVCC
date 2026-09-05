@@ -10,6 +10,9 @@
  * Verglichen wird mit hash_equals - ein einfaches == liesse sich ueber die
  * Antwortzeit Zeichen fuer Zeichen erraten.
  *
+ * Selbstpruefung:
+ *   selftest=1  beantwortet nur die Tokenfrage, loest nichts aus
+ *
  * Lesende Aktionen:
  *   status      eine Zeile EVCC;FELD=WERT;...   (Vorgabe)
  *   json        der Zustand als JSON, mit allen Feldern - auch den Texten
@@ -86,6 +89,14 @@ if ($ev_lib === '') {
 }
 require_once $ev_lib;
 
+/** Die Adresse des Anrufers, auf die zulaessigen Zeichen beschraenkt. */
+function ev_anrufer()
+{
+    return isset($_SERVER['REMOTE_ADDR'])
+        ? preg_replace('/[^0-9a-fA-F:.]/', '', (string) $_SERVER['REMOTE_ADDR'])
+        : '?';
+}
+
 function ev_ende($code, $text)
 {
     http_response_code($code);
@@ -99,22 +110,64 @@ function ev_ende($code, $text)
     // Statuszeile - auch die Liste der erlaubten Aktionen, die dadurch in
     // einer Zeile steht statt in zweien. Lesbar bleibt sie.
     $text = str_replace(array("\r\n", "\r", "\n"), ' ', (string) $text);
+    /* Jede Abweisung hinterlaesst eine Zeile.
+     *
+     * Bis 0.9.26 protokollierte dieser Endpunkt nur den abgesetzten Befehl.
+     * Gemessen: fuenf Abweisungswege (kein Token, falsches Token, Token als
+     * Feld, unbekannte Aktion, unzulaessiger Wert) - null Protokollzeilen.
+     * Damit war "der Miniserver ruft nicht an" von "er ruft an und wird
+     * abgewiesen" nicht zu unterscheiden; ein Virtueller Ausgang wertet die
+     * Antwort nicht aus und kann sich nicht beschweren.
+     *
+     * Die Zugangsmarke steht NIE darin - der abgewiesene Text ist die
+     * Antwort des Plugins, nicht die Anfrage. Gebremst ueber den Merker,
+     * sonst schriebe ein Miniserver im 30-Sekunden-Takt zwei Zeilen die
+     * Minute. */
+    if ($code >= 400) {
+        ev_log_wenn_neu('endpunkt_abweisung', 'Anfrage von ' . ev_anrufer()
+            . ' mit HTTP ' . (int) $code . ' beantwortet: ' . substr($text, 0, 120));
+    }
     echo rtrim($text) . "\n";
     exit;
 }
 
-/* Der unangemeldete Endpunkt DARF NICHTS ANLEGEN.
+/* VOR der Tokenpruefung wird nichts angelegt.
  *
- * Bis 0.9.10 rief er ev_config() ohne Einschraenkung auf. Gemessen mit leerem
- * Konfigurationsordner: ein einziger Aufruf OHNE Token - beantwortet mit
- * 403 - hinterliess .token.lock, evcc.json (mit frisch erzeugtem Token) und
- * die Zweitschrift. Wer sich nicht ausweisen kann, legt nichts an. */
+ * Bis 0.9.10 rief dieser Endpunkt ev_config() ohne Einschraenkung auf.
+ * Gemessen mit leerem Konfigurationsordner: ein einziger Aufruf OHNE Token -
+ * beantwortet mit 403 - hinterliess .token.lock, evcc.json (mit frisch
+ * erzeugtem Token) und die Zweitschrift. Wer sich nicht ausweisen kann, legt
+ * nichts an; nachgemessen am 04.09.2026, der Konfigordner blieb leer.
+ *
+ * Genau so weit reicht die Zusage. HINTER der Tokenpruefung darf die
+ * Selbstheilung greifen - ev_state() und ev_felder() rufen ev_config() dann
+ * ohne Einschraenkung, und eine fehlende Konfiguration wird aus der
+ * Zweitschrift zurueckgeschrieben. Das ist der Hausstandard, und es steht
+ * hier, damit der Satz oben nicht mehr verspricht, als er haelt. */
 $cfg = ev_config(false);
+
+/* ---------------- Selbstpruefung ----------------
+ *
+ * ?selftest=1&token=<TOKEN> beantwortet die Tokenfrage, OHNE etwas
+ * auszuloesen: kein Geraetekontakt, kein Schreibzugriff, kein Zwischenspeicher
+ * wird angefasst. So kann der Miniserver pruefen, ob seine Adressen noch
+ * stimmen, ohne einen Ladepunkt zu beruehren.
+ *
+ * Die drei Antworten sind der Hausstandard und stehen fest. Sie benutzen
+ * bewusst 403 auch dort, wo der normale Weg 503 sagt: der Selbsttest hat
+ * seinen eigenen Vertrag, an dem fremde Prueflaeufe haengen, und der normale
+ * Weg unterscheidet weiterhin "kein Token eingerichtet" (503) von "falsches
+ * Token" (403). */
+$ev_selftest = isset($_GET['selftest']) && is_string($_GET['selftest'])
+               && (string) $_GET['selftest'] === '1';
 
 /* ---------------- Token ---------------- */
 $soll = (string) $cfg['aktionstoken'];
-$ist  = isset($_GET['token']) ? (string) $_GET['token'] : '';
+/* is_string() zuerst: ?token[]=x macht aus dem Parameter ein Feld, und
+ * (string) auf ein Feld ist unter PHP 8 eine Warnung. */
+$ist  = (isset($_GET['token']) && is_string($_GET['token'])) ? (string) $_GET['token'] : '';
 if ($soll === '') {
+    if ($ev_selftest) { ev_ende(403, 'SELFTEST;OK=0;ERR=KEIN_TOKEN_EINGERICHTET'); }
     // Kein Token in der Konfiguration: das Plugin wurde noch nie in der
     // Oberflaeche geoeffnet, oder das Betriebssystem liefert keinen sicheren
     // Zufall. Das ist etwas anderes als ein falsches Token, und der Nutzer
@@ -124,14 +177,23 @@ if ($soll === '') {
 if (!hash_equals($soll, $ist)) {
     // Bewusst keine Auskunft darueber, ob das Token zu kurz, zu lang oder
     // schlicht falsch war.
+    if ($ev_selftest) { ev_ende(403, 'SELFTEST;OK=0;ERR=TOKEN'); }
     ev_ende(403, 'EVCC;OK=0;GRUND=TOKEN');
 }
+if ($ev_selftest) {
+    // Hier endet die Selbstpruefung. Nichts darunter laeuft mehr an.
+    ev_ende(200, 'SELFTEST;OK=1;TOKEN=OK');
+}
+/* Ein Anruf ist angekommen und hat sich ausgewiesen. Eine Zeile, gebremst -
+ * sie beantwortet spaeter die Frage, ob der Miniserver ueberhaupt anruft. */
+ev_log_wenn_neu('endpunkt_angenommen', 'Anfrage von ' . ev_anrufer() . ' angenommen.');
 
 /* ---------------- Aktion gegen die Weissliste ---------------- */
 $lesend = array('status', 'json', 'roh', 'wert', 'befehle');
 $befehle = ev_befehle();
 $schreibend = array_keys($befehle);
-$aktion = isset($_GET['aktion']) ? (string) $_GET['aktion'] : 'status';
+$aktion = (isset($_GET['aktion']) && is_string($_GET['aktion']))
+          ? (string) $_GET['aktion'] : 'status';
 if (!in_array($aktion, array_merge($lesend, $schreibend), true)) {
     ev_ende(400, "EVCC;OK=0;GRUND=UNBEKANNTE_AKTION\n"
                  . 'Erlaubt: ' . implode(', ', array_merge($lesend, $schreibend)));
@@ -150,10 +212,22 @@ $ev_hoechstalter = max(30, (int) round($cfg['takt'] * 2.5));
 
 /* ---------------- Lesende Aktionen ---------------- */
 
+/* json_encode() liefert bei ungueltigem UTF-8 false, und 'echo false' ist
+ * eine leere Antwort mit HTTP 200 - genau das Bild, das dieses Plugin an
+ * mehreren Stellen als seinen teuersten Fehler fuehrt. Gemessen an 0.9.26:
+ * eine lange EVCC-Fehlermeldung mit einem Umlaut auf der Kappungsgrenze
+ * ergab 200 und NULL Byte. Die Kappung ist seit 0.9.27 zeichensicher; die
+ * Wache hier bleibt trotzdem - sie kostet nichts und faengt jede andere
+ * Quelle ungueltiger Zeichen ab. */
 if ($aktion === 'roh') {
     $st = ev_state(false, $ev_hoechstalter);
+    $ev_js = json_encode($st['roh'],
+        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($ev_js === false) {
+        ev_ende(500, 'EVCC;OK=0;GRUND=JSON_UNLESBAR;INFO=' . json_last_error_msg());
+    }
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($st['roh'], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    echo $ev_js;
     exit;
 }
 
@@ -172,33 +246,44 @@ if ($aktion === 'json') {
         if (!empty($d['pfade']) && isset($werte[$k]) && $werte[$k]['pfad'] === '') { $ohne[] = $k; }
         if ($d['quelle'] === 'doku') { $ungemessen[] = $k; }
     }
-    header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(array('ok' => $st['ok'], 'stand' => $st['stand'],
+    $ev_js = json_encode(array('ok' => $st['ok'], 'stand' => $st['stand'],
                            'fehler' => $st['fehler'],
                            'fehler_nr' => isset($st['fehlernr']) ? (int) $st['fehlernr'] : 0,
                            'nicht_gefunden' => $ohne,
                            'aus_der_dokumentation' => $ungemessen,
                            'werte' => $flach),
                      JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($ev_js === false) {
+        ev_ende(500, 'EVCC;OK=0;GRUND=JSON_UNLESBAR;INFO=' . json_last_error_msg());
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo $ev_js;
     exit;
 }
 
 if ($aktion === 'befehle') {
     // Damit man ohne Oberflaeche nachsehen kann, was es gibt - und was davon
     // gemessen ist.
-    header('Content-Type: application/json; charset=utf-8');
     $aus = array();
     foreach ($befehle as $n => $b) {
         $aus[$n] = array('ebene' => $b['ebene'], 'methode' => $b['methode'],
                          'pfad' => $b['pfad'], 'pruefung' => $b['pruef'],
+                         'min' => isset($b['min']) ? $b['min'] : null,
+                         'max' => isset($b['max']) ? $b['max'] : null,
                          'quelle' => $b['quelle']);
     }
-    echo json_encode($aus, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $ev_js = json_encode($aus, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($ev_js === false) {
+        ev_ende(500, 'EVCC;OK=0;GRUND=JSON_UNLESBAR;INFO=' . json_last_error_msg());
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    echo $ev_js;
     exit;
 }
 
 if ($aktion === 'wert') {
-    $feld = isset($_GET['feld']) ? preg_replace('/[^a-z0-9_]/', '', (string) $_GET['feld']) : '';
+    $feld = (isset($_GET['feld']) && is_string($_GET['feld']))
+            ? preg_replace('/[^a-z0-9_]/', '', (string) $_GET['feld']) : '';
     $werte = ev_werte(ev_state(false, $ev_hoechstalter));
     if ($feld === '' || !isset($werte[$feld])) {
         ev_ende(400, '-');
@@ -230,7 +315,8 @@ if ($b['ebene'] === 'lp' && ($lp < 1 || $lp > EV_LADEPUNKTE)) {
 
 /* Wert pruefen. Die Regel steht in ev_befehle(), nicht hier - so kann sie
  * nicht zwischen Endpunkt, Oberflaeche und Vorlage auseinanderlaufen. */
-$wert = isset($_GET['wert']) ? trim((string) $_GET['wert']) : '';
+$wert = (isset($_GET['wert']) && is_string($_GET['wert']))
+        ? trim((string) $_GET['wert']) : '';
 if ($b['pruef'] !== 'ohne' && $wert === '') {
     ev_ende(400, 'EVCC;OK=0;GRUND=WERT_FEHLT');
 }
@@ -244,7 +330,8 @@ if (!$ok) {
  * gerechnet - das ist die Zahl, die ein Loxone-Baustein ohnehin hat. */
 $zeit = '';
 if ($b['pruef'] === 'plan') {
-    $std = isset($_GET['stunden']) ? str_replace(',', '.', (string) $_GET['stunden']) : '';
+        $std = (isset($_GET['stunden']) && is_string($_GET['stunden']))
+           ? str_replace(',', '.', (string) $_GET['stunden']) : '';
     if (!is_numeric($std)) {
         ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=STUNDEN_FEHLT;ERLAUBT=0.25..168');
     }

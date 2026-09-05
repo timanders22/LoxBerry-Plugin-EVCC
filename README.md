@@ -9,6 +9,102 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.27
+
+Eine Durchsicht der veröffentlichten 0.9.26 hat 38 Punkte ergeben; behoben
+sind alle bis auf einen (siehe *Offen* am Ende dieses Abschnitts). Was für den
+Betrieb zählt:
+
+**Ein Lademodus außerhalb 0..3 beendete die Ladung.** `wert=4`, `7`, `99` oder
+`-3` an `aktion=modus` wurden stillschweigend auf `off` abgebildet und mit
+`OK=1` quittiert — ein Analogausgang, der aus irgendeinem Grund einen falschen
+Wert schickte, schaltete damit die Ladung ab. Jetzt wird abgewiesen:
+`MODUS_UNGUELTIG`. Ebenso kennen `smartcostlimit`, `limitenergie` und
+`netzladegrenze` jetzt Grenzen; ohne sie ging eine negative Ladeenergiegrenze
+ungeprüft an EVCC.
+
+**Neun Felder standen dauerhaft auf 0.** `PROGNOSE_HEUTE/MORGEN/UEBERMORGEN`
+und `PREIS_MIN/MAX/SCHNITT/RANG/STUNDEN/GUENSTIGSTE_STUNDE` wurden nur vom
+Knopf im Reiter *Test* gefüllt, nie vom Abrufdienst. Wer der Empfehlung des
+Plugins gefolgt ist und in Loxone `EVCC_PREIS_RANG ≤ 6` verglichen hat, hatte
+damit eine **dauerhafte Ladefreigabe** — ein echter Rang beginnt bei 1, die 0
+bedeutete „keine Daten". Der Abrufdienst holt die Werte jetzt selbst.
+
+**Ein hinterlegtes Aktionstoken wurde stumm ersetzt.** Passte es nicht auf das
+Muster der eigenen Erzeugung (32 Zeichen, Buchstaben und Ziffern), erzeugte das
+Plugin beim nächsten Aufruf ein neues und überschrieb das alte — ohne eine
+Zeile im Protokoll. Jede im Miniserver eingetragene Adresse wurde damit
+ungültig, und ein Virtueller Ausgang wertet die 403 nicht aus. Betroffen war,
+wer sein Token von Hand gesetzt oder aus einer Sicherung zurückgespielt hat.
+Jetzt entsteht ein Token nur, wenn noch nie eines hinterlegt war; ein bewusst
+geleertes bleibt leer, und der Reiter *Test* sagt, wie stark das vorhandene ist.
+
+**Eine beschädigte `evcc.json` wurde nie geheilt.** Sie blieb beschädigt, jeder
+Aufruf zog erneut die Zweitschrift und schrieb dabei eine Fehlerzeile — im Cron
+bis zu zwölfmal die Minute. Jetzt wird aus der Zweitschrift wirklich
+zurückgeschrieben, und gemeldet wird einmal, was tatsächlich geschah.
+
+**`aktion=json` konnte mit HTTP 200 und null Byte antworten**, wenn EVCCs
+Fehlermeldung an der Kappungsgrenze mitten in einem Umlaut endete. Die Kappung
+ist jetzt zeichensicher, und der Endpunkt prüft das Ergebnis von `json_encode`.
+
+**Neu: `?selftest=1&token=…`** beantwortet die Tokenfrage, ohne etwas
+auszulösen — drei festgelegte Antworten. Und der Endpunkt schreibt jetzt auf
+**jedem** Weg eine Protokollzeile mit der Adresse des Anrufers; bisher war
+„der Miniserver ruft nicht an" von „er ruft an und wird abgewiesen" nicht zu
+unterscheiden.
+
+**Beim Zurückspielen einer Sicherung wird jetzt jeder Wert geprüft**, nicht nur
+der Schlüsselname; ein Feld als Adresse, ein Text als Takt oder ein Nullbyte im
+Passwort kamen bisher durch. Die Sicherungsdatei trägt einen lesbaren Kopf.
+
+**Umbenannt: die Titel der Ausgangsvorlage** heißen jetzt `EVCC_SET_…` statt
+`EVCC_…`. Grund: das Feld `entladeregelung` und der gleichnamige Befehl ergaben
+zweimal denselben Bausteintitel, und in der Bausteinsuche von Loxone Config
+stehen Eingänge und Ausgänge nebeneinander. **Wer die Ausgangsvorlage schon
+importiert hat und sie erneut einliest, bekommt die neuen Ausgänge NEBEN die
+alten** — Loxone Config legt beim Import neu an und überschreibt nichts. Die
+alten löschen Sie von Hand. Eingänge, Statuszeile, MQTT-Themen und jede
+Befehlserkennung sind unverändert; wer die Ausgänge nicht neu importiert, merkt
+nichts.
+
+**Die Feldtabelle ist umsortiert.** Gemessen gegen das Tag-Archiv v0.9.10:
+alle 50 Felder von damals sind noch da und stehen untereinander in
+unveränderter Reihenfolge — aber die 59 seither hinzugekommenen saßen mitten
+drin, das erste an Stelle 11, mit 40 alten Feldern dahinter. Jetzt stehen sie
+am Ende, und eine Prüfzeile im Reiter *Test* hält es so. **Für bestehende
+Anlagen ändert sich dadurch nichts**: die Befehlserkennung von Loxone arbeitet
+über den Feldnamen (`\i;NAME=\i\v`), nicht über die Position. Wer die
+Statuszeile mit einem eigenen Skript nach Position ausliest, muss nachziehen.
+Auch die Reihenfolge in der Importvorlage und in der Thementabelle des Reiters
+*MQTT* folgt jetzt dieser Ordnung.
+
+**Installer:** `postroot.sh` legt die sudo-Regel jetzt auch dann an, wenn der
+Download der Paketquelle oder die Installation von EVCC fehlschlägt — genau die
+zwei Fälle, in denen das Skript rät, EVCC von Hand nachzuinstallieren; bisher
+hatte man danach Dienstknöpfe, die nicht wirken konnten. Die Paketliste wird
+nur noch für die eigene Quelle aufgefrischt. `dos2unix` steht jetzt in
+`dpkg/apt` und wird geprüft, statt Erfolg zu melden. Das Deinstallationsskript
+räumt die Sicherung neben dem Datenordner wirklich ab; bisher blieb dort das
+EVCC-Passwort im Klartext liegen, während die Meldung das Gegenteil sagte.
+`cron.err` wird gekappt.
+
+**Oberfläche:** Die Schlusszeile der Selbstprüfung zählt „nicht feststellbar"
+nicht mehr als bestanden (gemessen: 24 Zeilen, 12 Haken, 8 Hinweise, 4 Kreuze —
+ausgegeben wurde „20 von 24 bestanden"). Der Reiter *Einbindung in Loxone*
+zeigt in Schritt 3 die Adresse, von der er spricht. Die sudo-Zeile und die
+Dienstknöpfe messen die Wirkung statt des Rückgabewerts. Vier neue Prüfzeilen:
+Eindeutigkeit der Bausteintitel über beide Vorlagen, Regeln fürs
+Zurückspielen, Stärke des Aktionstokens, und die Reiterprüfung urteilt nicht
+mehr über die leere Menge.
+
+**Offen:** Der Hausstandard verlangt, Zustände mit *retain* zu senden und
+Messwerte ohne. Dieses Plugin sendet bisher **kein** Thema retained. Die
+Umstellung steht aus, bis am laufenden Gateway gemessen ist, wie es das
+`retain`-Verb auf dem UDP-Eingang behandelt — eine leere Nutzlast als retained
+gesendet löscht ein Thema im Broker, und das ist kein Risiko für eine
+ungemessene Annahme.
+
 ## Neu in 0.9.18
 
 Die Erkennung einer Entwicklerfassung prüfte nur auf `-dev`. Gemessen an
@@ -385,6 +481,10 @@ Ladeleistung nur als *Statuseingang* in den Baustein zu geben.
 2. Im Reiter *Einstellungen* Adresse prüfen, Umfang festlegen.
 3. Im Reiter *MQTT* das Abo ins Gateway eintragen. **Ohne diesen Eintrag kommt
    am Miniserver nichts an** — das ist die häufigste Fehlerursache.
+   Das gilt für **MQTT-Gateway V1**. Ab Fassung 2 erscheint die Themengruppe
+   von selbst in den *Subscriptions*, und einzutragen ist dort nichts; der
+   Reiter *MQTT* liest die Fassung aus `config/system/general.json` und zeigt
+   den Satz, der zu Ihrem Gateway passt.
 4. Im Reiter *Einbindung in Loxone* die Vorlage erzeugen und importieren.
 5. Im Reiter *Test* die Selbstprüfung ansehen.
 

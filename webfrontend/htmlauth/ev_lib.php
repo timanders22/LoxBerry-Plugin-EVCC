@@ -80,9 +80,38 @@ function ev_paths()
     }
     $plugin = getenv('LBPPLUGINDIR');
     if (!$plugin) {
-        // Ohne Umgebungsvariable (Aufruf von Hand) aus dem Ablageort ableiten.
-        $plugin = basename(dirname(dirname(__DIR__)));
-        if ($home && !is_dir($home . '/config/plugins/' . $plugin)) { $plugin = 'evcc'; }
+        /* Ohne Umgebungsvariable aus dem Ablageort ableiten - ueber eine
+         * KANDIDATENLISTE, nicht ueber eine einzelne Rechnung.
+         *
+         * Diese Datei liegt in zwei Lagen verschieden tief:
+         *   installiert  <home>/webfrontend/htmlauth/plugins/<ordner>/ev_lib.php
+         *   Archiv       <wurzel>/webfrontend/htmlauth/ev_lib.php
+         * basename(__DIR__) trifft die erste, zwei Ebenen hoeher die zweite.
+         *
+         * Bis 0.9.26 stand nur die zweite Rechnung da. Installiert ergab sie
+         * 'htmlauth'; gerettet hat das nur der fest eingetragene Name 'evcc' -
+         * und genau der bricht bei einer Zweitinstallation, die LoxBerry als
+         * <ordner>_01 anlegt. Gemessen am 04.09.2026: eine Installation als
+         * evcc_01 benutzte Konfiguration, Aktionstoken, Protokoll und
+         * Sperrdatei der ERSTEN. Ebenso gemessen: lag ein fremdes
+         * config/plugins/htmlauth vor, wanderte alles dorthin.
+         *
+         * 'htmlauth' und 'html' sind Namen von BAEUMEN, nie von
+         * Plugin-Ordnern - eine Rechnung, die dort landet, liegt eine Ebene
+         * daneben und wird uebergangen. */
+        $plugin = '';
+        foreach (array(basename(__DIR__),
+                       basename(dirname(dirname(__DIR__)))) as $ev_kand) {
+            if ($ev_kand === '' || $ev_kand === 'htmlauth' || $ev_kand === 'html') {
+                continue;
+            }
+            if ($plugin === '') { $plugin = $ev_kand; }
+            if ($home && is_dir($home . '/config/plugins/' . $ev_kand)) {
+                $plugin = $ev_kand;    // belegt - der sticht die blosse Rechnung
+                break;
+            }
+        }
+        if ($plugin === '') { $plugin = 'evcc'; }
     }
     if ($home) {
         return array(
@@ -228,6 +257,8 @@ function ev_config($erzeugen = true)
     $cfg = null;
     $ziehen = false;
     $ev_geholt = '';
+    $ev_defekt = false;
+    $ev_hatte_token = false;
 
     if ($roh === '' || $roh === '{}') {
         $ziehen = true;                     // fehlt oder leer - der harmlose Fall
@@ -236,12 +267,23 @@ function ev_config($erzeugen = true)
         if (!is_array($cfg)) {
             $cfg = null;
             $ziehen = true;
-            ev_log('FEHLER: ' . $p['config'] . ' ist kein gueltiges JSON ('
-                 . json_last_error_msg() . ', ' . strlen($roh) . ' Byte). Die '
-                 . 'Zweitschrift wird gelesen; die beschaedigte Datei bleibt '
-                 . 'als .kaputt liegen.');
+            $ev_defekt = true;
+            /* EINE Zeile, nicht eine je Aufruf. ev_config() laeuft je
+             * Endpunktabfrage mehrfach und im Cron bis zu zwoelfmal die
+             * Minute; mit ev_log() bestand das Protokoll danach aus dieser
+             * einen Meldung, und die Kappung bei 512 kB warf alles andere
+             * weg. Gemessen an 0.9.26: fuenf Aufrufe, fuenf Zeilen. */
+            ev_log_wenn_neu('configjson', 'FEHLER: ' . $p['config'] . ' ist kein '
+                 . 'gueltiges JSON (' . json_last_error_msg() . ', '
+                 . strlen($roh) . ' Byte). Die Zweitschrift wird gelesen; die '
+                 . 'beschaedigte Datei bleibt als .kaputt liegen.');
             if ($erzeugen && !is_file($p['config'] . '.kaputt')) {
                 @copy($p['config'], $p['config'] . '.kaputt');
+                /* Die Kopie traegt Passwort und Aktionstoken wie das
+                 * Original. copy() legt mit 0666 & ~umask an - ohne diese
+                 * Zeile laege ein Abbild beider Geheimnisse fuer alle lesbar
+                 * im Konfigordner. */
+                @chmod($p['config'] . '.kaputt', 0600);
             }
         }
     }
@@ -265,6 +307,11 @@ function ev_config($erzeugen = true)
     }
 
     if (!is_array($cfg)) { $cfg = array(); }
+    /* Vor dem Zusammenfuehren festhalten, ob ueberhaupt schon einmal ein
+     * Aktionstoken hinterlegt war. Nach array_merge() ist das nicht mehr zu
+     * unterscheiden: die Vorgabe traegt einen leeren Wert, und 'fehlt' saehe
+     * dann aus wie 'bewusst geleert'. */
+    $ev_hatte_token = array_key_exists('aktionstoken', $cfg);
     $cfg = array_merge(ev_vorgaben(), $cfg);
 
     $cfg['url'] = rtrim(trim((string) $cfg['url']), '/');
@@ -286,16 +333,32 @@ function ev_config($erzeugen = true)
     // hier ankommen. Ohne Sperre erzeugt jeder ein eigenes Token und
     // ueberschreibt die anderen - wer sich das Token vorher aus der
     // Oberflaeche abgeschrieben hat, haelt danach ein ungueltiges in der Hand.
-    if (!preg_match('/^[A-Za-z0-9]{24,}$/', (string) $cfg['aktionstoken']) && $erzeugen) {
+    /* Ein Token entsteht genau einmal: wenn noch nie eines hinterlegt war.
+     *
+     * Bis 0.9.26 stand hier ein Mustervergleich - was nicht auf
+     * ^[A-Za-z0-9]{24,}$ passte, wurde stillschweigend ersetzt. Gemessen am
+     * Endpunkt (04.09.2026): ein von Hand gesetztes 'kurz123' wirkte beim
+     * ersten Aufruf, war danach ueberschrieben, der zweite Aufruf bekam 403 -
+     * und im Protokoll stand nichts. Jede im Miniserver eingetragene Adresse
+     * wird so stumm ungueltig, denn ein Virtueller Ausgang wertet die 403
+     * nicht aus. Derselbe Weg fuehrt durch das Zurueckspielen einer
+     * Sicherung. Dieselbe Klasse wie VolkswagenID 0.9.10.
+     *
+     * Ein VORHANDENER, aber leerer Wert bleibt leer: Leeren ist der
+     * Ausschalter fuer den Endpunkt, und wer ihn benutzt, will ihn nicht
+     * beim naechsten Seitenaufruf zurueckbekommen. Ob ein hinterlegtes Token
+     * taugt, meldet der Reiter Test - melden ist richtig, stillschweigend
+     * ersetzen nicht. */
+    if (!$ev_hatte_token && $erzeugen) {
         @mkdir($p['configdir'], 0775, true);
         $sperre = @fopen($p['configdir'] . '/.token.lock', 'c');
         if ($sperre !== false && flock($sperre, LOCK_EX)) {
             // Innerhalb der Sperre noch einmal nachsehen: vielleicht war ein
             // anderer Prozess schneller, dann wird seines uebernommen.
             $frisch = @json_decode((string) @file_get_contents($p['config']), true);
-            if (is_array($frisch)
-                && preg_match('/^[A-Za-z0-9]{24,}$/', (string) (isset($frisch['aktionstoken']) ? $frisch['aktionstoken'] : ''))) {
-                $cfg['aktionstoken'] = $frisch['aktionstoken'];
+            if (is_array($frisch) && array_key_exists('aktionstoken', $frisch)
+                && (string) $frisch['aktionstoken'] !== '') {
+                $cfg['aktionstoken'] = (string) $frisch['aktionstoken'];
             } else {
                 try {
                     $cfg['aktionstoken'] = ev_token();
@@ -310,6 +373,15 @@ function ev_config($erzeugen = true)
             flock($sperre, LOCK_UN);
         }
         if ($sperre !== false) { fclose($sperre); }
+    } elseif ($ev_hatte_token && (string) $cfg['aktionstoken'] === '') {
+        /* Bestehende Anlage, Token leer: das ist eine Lage, kein Fehler -
+         * aber der Betreiber soll sie nicht in Loxone suchen muessen. Eine
+         * Zeile, gebremst ueber den Merker. */
+        ev_log_wenn_neu('tokenleer', 'Das Aktionstoken ist leer. Der Endpunkt '
+            . 'weist jede Anfrage mit KEIN_TOKEN_EINGERICHTET ab. Ein neues '
+            . 'entsteht im Reiter Einstellungen auf Knopfdruck; von selbst '
+            . 'wird keines nachgelegt, damit ein bewusst geleertes Token '
+            . 'geleert bleibt.');
     }
 
     /* Die Zweitschrift EINMAL zurueckschreiben - und einmal melden.
@@ -326,11 +398,22 @@ function ev_config($erzeugen = true)
      * Gemeldet wird ueber ev_log_wenn_neu - der Merker in /tmp haelt auch die
      * naechsten Prozesse still. */
     if ($ev_geholt !== '') {
+        /* Wiederhergestellt wird auch, wenn die Datei DA ist, aber
+         * beschaedigt. Bis 0.9.26 stand hier nur '!is_file(...)': eine
+         * abgeschnittene evcc.json wurde nie geheilt, jeder Aufruf zog erneut
+         * die Zweitschrift, und die Meldung sagte trotzdem
+         * 'und wiederhergestellt'. Gemessen: fuenf Aufrufe, Datei danach
+         * unveraendert kaputt.
+         *
+         * Gemeldet wird, was wirklich geschah - nicht, was vorhatte zu
+         * geschehen. */
+        $ev_heilen = $erzeugen && (!is_file($p['config']) || $ev_defekt);
+        $ev_geheilt = $ev_heilen ? ev_config_write($cfg) : false;
         ev_log_wenn_neu('zweitschrift', 'Konfiguration aus der Zweitschrift '
-            . $ev_geholt . ' geholt' . ($erzeugen ? ' und wiederhergestellt.' : '.'));
-        if ($erzeugen && !is_file($p['config'])) {
-            ev_config_write($cfg);
-        }
+            . $ev_geholt . ' geholt'
+            . ($ev_geheilt ? ' und wiederhergestellt.'
+                           : ($ev_heilen ? '; das Zurueckschreiben ist fehlgeschlagen.'
+                                         : '.')));
     }
     return $cfg;
 }
@@ -438,25 +521,32 @@ function ev_token($laenge = 32)
 function ev_netzfehler($text, $url)
 {
     $t = strtolower((string) $text);
-    $wirt = parse_url($url, PHP_URL_HOST) . ':' . (parse_url($url, PHP_URL_PORT) ?: 80);
+    /* Die Vorgabe richtet sich nach dem Schema. Bis 0.9.26 stand hier fest
+     * 80 - bei einer https-Adresse ohne Portangabe nannte der Fehlertext
+     * dann einen Port, den niemand angesprochen hat. */
+    $ev_schema = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+    $ev_port = parse_url($url, PHP_URL_PORT);
+    if (!$ev_port) { $ev_port = ($ev_schema === 'https') ? 443 : 80; }
+    $wirt = parse_url($url, PHP_URL_HOST) . ':' . $ev_port;
+    /* Diese Meldungen sind die aussagekraeftigsten des Plugins, und sie
+     * erreichen einen Menschen - in der Oberflaeche, im Feld LETZTER_FEHLER
+     * und ueber MQTT. Bis 0.9.26 standen sie fest auf Deutsch im Quelltext
+     * und erschienen so auch in der englischen Oberflaeche. */
     if (strpos($t, 'refused') !== false || strpos($t, 'verweigert') !== false) {
-        return 'Verbindung abgewiesen (' . $wirt . ') - der Rechner ist erreichbar, '
-             . 'aber auf diesem Port lauscht nichts. Laeuft EVCC? Stimmt der Port?';
+        return sprintf(ev_t('FEHLER.ABGEWIESEN'), $wirt);
     }
     if (strpos($t, 'timed out') !== false || strpos($t, 'timeout') !== false
         || strpos($t, 'zeit') !== false) {
-        return 'Zeitueberschreitung (' . $wirt . ') - es antwortet nichts. '
-             . 'Adresse falsch, Rechner aus, oder eine Firewall verschluckt es.';
+        return sprintf(ev_t('FEHLER.ZEIT'), $wirt);
     }
     if (strpos($t, 'no route') !== false || strpos($t, 'unreachable') !== false) {
-        return 'Kein Weg zu ' . $wirt . ' - falsches Netz oder falsche Adresse.';
+        return sprintf(ev_t('FEHLER.KEIN_WEG'), $wirt);
     }
     if (strpos($t, 'resolve') !== false || strpos($t, 'not known') !== false
         || strpos($t, 'getaddrinfo') !== false) {
-        return 'Name nicht aufloesbar (' . $wirt . ') - Schreibfehler im '
-             . 'Rechnernamen, oder der DNS antwortet nicht.';
+        return sprintf(ev_t('FEHLER.NAME'), $wirt);
     }
-    return $text !== '' ? (string) $text : 'keine Antwort von ' . $wirt;
+    return $text !== '' ? (string) $text : sprintf(ev_t('FEHLER.KEINE_ANTWORT_VON'), $wirt);
 }
 
 function ev_http($pfad, $methode = 'GET', $rumpf = null, $zeit = 8)
@@ -1110,7 +1200,11 @@ function ev_felder()
     /* ---- Zustand des Plugins selbst ---- */
     $f['ok'] = array('pfade' => array(), 'typ' => 'bool', 'analog' => 0, 'min' => 0, 'max' => 1,
         'einheit' => '', 'text' => 'FELD.OK', 'mqtt' => '');
-    $f['alter_s'] = array('pfade' => array(), 'typ' => 'zahl', 'analog' => 1, 'min' => 0, 'max' => 86400,
+    /* max 99999, nicht 86400: genau diese Zahl ist der Fehlwert weiter
+     * unten ("noch nie gemessen"). Mit MaxVal 86400 kappte Loxone ihn, und
+     * "noch nie gemessen" war von "genau 24 h alt" nicht mehr zu
+     * unterscheiden. Eine Zahl, eine Stelle. */
+    $f['alter_s'] = array('pfade' => array(), 'typ' => 'zahl', 'analog' => 1, 'min' => 0, 'max' => 99999,
         'einheit' => 's', 'text' => 'FELD.ALTER', 'mqtt' => '');
     $f['dienst'] = array('pfade' => array(), 'typ' => 'bool', 'analog' => 0, 'min' => 0, 'max' => 1,
         'einheit' => '', 'text' => 'FELD.DIENST', 'mqtt' => '');
@@ -1144,6 +1238,45 @@ function ev_felder()
     $f['letzter_fehler'] = array('pfade' => array(), 'typ' => 'text', 'analog' => 0, 'min' => 0, 'max' => 1,
         'einheit' => '', 'text' => 'FELD.LETZTER_FEHLER', 'mqtt' => '', 'zeile' => 0);
 
+    /* ---- Seit wann gibt es das Feld? ----
+     *
+     * Das ist eine ANDERE Frage als 'quelle'. 'quelle' sagt, ob ein Feld an
+     * einer Anlage gemessen oder aus der EVCC-Dokumentation uebernommen ist;
+     * 'seit' sagt, ab welcher Fassung es in der Tabelle steht. Gemessen am
+     * 04.09.2026 gegen das Tag-Archiv v0.9.10: fuenf Felder tragen
+     * quelle=bestand und kamen trotzdem erst in 0.9.11 dazu
+     * (betriebsbereit, fehler_nr, letzter_fehler, fz*_limit_soc). Wer nach
+     * 'quelle' sortiert, laesst genau die vorne stehen.
+     *
+     * Diese Liste steht hier an EINER Stelle, damit sie beim naechsten neuen
+     * Feld nicht uebersehen wird - und der Reiter Test prueft die Ordnung
+     * nach, statt sich auf die Liste zu verlassen. */
+    $ev_ab0911_anlage = array(
+        'batteriemodus_nr', 'residualleistung_w', 'entladeregelung',
+        'netz_bezug_kwh', 'pv_ertrag_kwh', 'speicher_kapazitaet_kwh', 'zusatz_kw',
+        'prognose_heute', 'prognose_morgen', 'prognose_uebermorgen',
+        'preis_min_24h', 'preis_max_24h', 'preis_schnitt_24h',
+        'preis_rang', 'preis_stunden', 'preis_guenstigste_stunde',
+        'fehler_nr', 'betriebsbereit', 'letzter_fehler',
+    );
+    $ev_ab0911_lp = array(
+        'min_soc', 'minstrom_a', 'maxstrom_a', 'smartcost_grenze', 'batterieboost',
+        'phasen_soll', 'pv_warten_min', 'phasen_warten_min', 'gesamt_kwh',
+        'sitzung_kwh', 'sitzung_preis', 'sitzung_preis_kwh', 'sitzung_co2',
+        'ladedauer_min', 'rest_kwh', 'strom_a', 'plan_soc', 'plan_kwh',
+        'fahrzeug_name',
+    );
+    $ev_ab0911_fz = array('limit_soc');
+
+    $ev_spaet = array();
+    foreach ($ev_ab0911_anlage as $ev_n) { $ev_spaet[$ev_n] = 1; }
+    for ($ev_i = 1; $ev_i <= EV_LADEPUNKTE; $ev_i++) {
+        foreach ($ev_ab0911_lp as $ev_n) { $ev_spaet['lp' . $ev_i . '_' . $ev_n] = 1; }
+    }
+    for ($ev_i = 1; $ev_i <= EV_FAHRZEUGE; $ev_i++) {
+        foreach ($ev_ab0911_fz as $ev_n) { $ev_spaet['fz' . $ev_i . '_' . $ev_n] = 1; }
+    }
+
     /* Vorgaben ergaenzen, damit die 40 Eintraege des Bestandes unangetastet
      * bleiben konnten. 'bestand' heisst: seit 0.9.x im Betrieb. 'doku' heisst:
      * in 0.9.11 aus der EVCC-Dokumentation ergaenzt und an keiner Anlage
@@ -1151,8 +1284,24 @@ function ev_felder()
     foreach ($f as $ev_n => $ev_d) {
         if (!isset($f[$ev_n]['quelle'])) { $f[$ev_n]['quelle'] = 'bestand'; }
         if (!isset($f[$ev_n]['zeile'])) { $f[$ev_n]['zeile'] = 1; }
+        if (!isset($f[$ev_n]['seit'])) {
+            $f[$ev_n]['seit'] = isset($ev_spaet[$ev_n]) ? '0.9.11' : '0.9.10';
+        }
     }
-    return $f;
+
+    /* ---- Stabile Teilung: erst der Stand 0.9.10, dann alles Spaetere ----
+     *
+     * Innerhalb beider Haelften bleibt die bisherige Reihenfolge Zeichen fuer
+     * Zeichen erhalten - es wird nichts umgestellt, nur verschoben. Ab hier
+     * gilt: ein neues Feld wird ANGEHAENGT und traegt 'seit' mit der Fassung,
+     * in der es dazukam. */
+    $ev_alt = array();
+    $ev_neu = array();
+    foreach ($f as $ev_n => $ev_d) {
+        if ($ev_d['seit'] === '0.9.10') { $ev_alt[$ev_n] = $ev_d; }
+        else { $ev_neu[$ev_n] = $ev_d; }
+    }
+    return array_merge($ev_alt, $ev_neu);
 }
 
 /** Nur die Felder, die in die Statuszeile und in die Loxone-Vorlage gehoeren. */
@@ -1192,13 +1341,21 @@ function ev_flach_text($v, $grenze = 400)
     foreach ($teile as $s) {
         if ($s === '') { continue; }
         if ($t === '') { $t = $s; continue; }
-        // Endet der bisherige Text schon auf einem Satzzeichen, kein zweites
-        // dazusetzen.
+        // Endet der bisherige Text schon auf einem Doppelpunkt, kein
+        // zweites Trennzeichen dazusetzen.
         $t .= (substr($t, -1) === ':' ? ' ' : ': ') . $s;
     }
     $t = trim(preg_replace('/\s+/', ' ', $t));
     if ($grenze > 0 && strlen($t) > $grenze) {
-        $t = rtrim(substr($t, 0, $grenze)) . ' [...]';
+        $t = substr($t, 0, $grenze);
+        /* Byteweise kappen darf kein angeschnittenes Mehrbytezeichen
+         * zuruecklassen. Gemessen an 0.9.26: lag ein Umlaut genau auf der
+         * Grenze, war das Ergebnis ungueltiges UTF-8, json_encode() lieferte
+         * false, und aktion=json antwortete mit HTTP 200 und NULL Byte -
+         * ausgerechnet dann, wenn EVCC eine lange Fehlermeldung liefert.
+         * Ohne mbstring, das auf einem LoxBerry nicht garantiert ist. */
+        $t = preg_replace('/(?:[\xC0-\xFF][\x80-\xBF]*)$/', '', $t);
+        $t = rtrim($t) . ' [...]';
     }
     return $t;
 }
@@ -1270,18 +1427,25 @@ function ev_einrichtung($st = null)
 }
 
 /** Lademodus als Zahl: 0 aus, 1 sofort, 2 min+PV, 3 nur PV. *//** Lademodus als Zahl: 0 aus, 1 sofort, 2 min+PV, 3 nur PV. */
+/** Die Lademodi von EVCC - EINE Tabelle fuer alle drei Verwender. */
+function ev_modus_liste()
+{
+    return array(0 => 'off', 1 => 'now', 2 => 'minpv', 3 => 'pv');
+}
+
 function ev_modus_nr($text)
 {
-    $k = array('off' => 0, 'now' => 1, 'minpv' => 2, 'pv' => 3);
+    $k = array_flip(ev_modus_liste());
     $t = strtolower(trim((string) $text));
     return isset($k[$t]) ? $k[$t] : 0;
 }
 
-function ev_modus_text($nr)
-{
-    $k = array(0 => 'off', 1 => 'now', 2 => 'minpv', 3 => 'pv');
-    return isset($k[(int) $nr]) ? $k[(int) $nr] : 'off';
-}
+/* ev_modus_text() gibt es seit 0.9.27 nicht mehr. Sie bildete eine Zahl auf
+ * einen Modusnamen ab und fiel dabei fuer JEDE unbekannte Zahl auf 'off'
+ * zurueck - und genau daran hing der Fehler, dass ein Lademodus 4 oder 7 die
+ * Ladung beendete statt abgewiesen zu werden. Nach der Berichtigung rief sie
+ * niemand mehr; eine Funktion, die nur noch ein Kommentar rechtfertigt, wird
+ * entfernt und nicht aufgehoben. Die Zuordnung steht in ev_modus_liste(). */
 
 /** Die Fahrzeugnamen aus dem Zustand, in stabiler Reihenfolge. */
 function ev_fahrzeugnamen($st = null)
@@ -1477,7 +1641,7 @@ function ev_update_ausfuehren()
 function ev_mqtt_zustand()
 {
     $p = ev_paths();
-    $out = array('gefunden' => 0, 'udpport' => 0, 'autostart' => 0);
+    $out = array('gefunden' => 0, 'udpport' => 0, 'autostart' => 0, 'fassung' => 0);
     if ($p['home'] === '') { return $out; }
     $gen = @json_decode((string) @file_get_contents($p['home'] . '/config/system/general.json'), true);
     if (!is_array($gen)) { return $out; }
@@ -1493,6 +1657,21 @@ function ev_mqtt_zustand()
         foreach (array('Udpinport', 'udpinport') as $pk) {
             if (isset($gen[$k][$pk])) { $out['udpport'] = (int) $gen[$k][$pk]; }
         }
+        /* Die FASSUNG des MQTT-Gateways, ab Werk 1. Sie entscheidet, was der
+         * Anwender eintragen muss: unter V1 jedes Thema von Hand, ab V2
+         * erscheint die Themengruppe von selbst in den Subscriptions.
+         * 0 heisst "nicht feststellbar" - dann wird nichts behauptet,
+         * sondern es werden beide Faelle genannt.
+         *
+         * Sie steht HIER und nicht in der Autostart-Schleife darunter. Bis
+         * 0.9.26 hing sie dort mit drin: fehlte der Schluessel
+         * Gatewayautostart, blieb die Fassung ungelesen, obwohl
+         * Gatewayversion unmittelbar daneben stand. Gemessen an drei
+         * general.json - nicht der Wert des Nachbarschluessels entschied,
+         * sondern sein blosses Vorhandensein. */
+        if (isset($gen[$k]['Gatewayversion'])) {
+            $out['fassung'] = (int) $gen[$k]['Gatewayversion'];
+        }
         /* Der Schluessel heisst Gatewayautostart, NICHT Autostart.
          *
          * 'Autostart' gibt es in der general.json nicht. Gemessen gegen die
@@ -1506,13 +1685,6 @@ function ev_mqtt_zustand()
             if (isset($gen[$k][$ak])) {
                 $out['autostart'] = in_array((string) $gen[$k][$ak],
                     array('1', 'true'), true) ? 1 : 0;
-                /* Die FASSUNG des MQTT-Gateways, ab Werk 1. Sie entscheidet, was der
-                 * Anwender eintragen muss: unter V1 jedes Thema von Hand, ab V2
-                 * erscheint die Themengruppe von selbst in den Subscriptions.
-                 * 0 heisst "nicht feststellbar" - dann wird nichts behauptet,
-                 * sondern es werden beide Faelle genannt. */
-                $out['fassung'] = isset($gen[$k]['Gatewayversion'])
-                    ? (int) $gen[$k]['Gatewayversion'] : 0;
             }
         }
     }
@@ -1787,15 +1959,41 @@ function ev_endpunkt($aktion = 'status', $mit_token = true)
 }
 
 /** Vorlage der virtuellen EINGAENGE. Rueckgabe: array(name, inhalt) */
+/**
+ * Aus einer Beschriftung einen KACHELNAMEN machen.
+ *
+ * Der Comment einer Importvorlage wird beim Import zum Attribut Desc und
+ * damit zum Anzeigenamen in Loxone Config. Ein Satz taugt dafuer nicht:
+ * gemessen an 0.9.26 waren 64 von 106 Kommentaren laenger als vierzig
+ * Zeichen, der laengste 72 - lauter Saetze als Kachelnamen. Dieselbe Klasse
+ * wie APC-UPS 1.1.6 (161 Zeichen).
+ *
+ * Geschnitten wird an der ersten Klammer: davor steht der Name, darin die
+ * Erklaerung. Die Erklaerung geht nicht verloren - sie steht weiterhin in
+ * der Feldtabelle des Reiters Einbindung in Loxone und in der Thementabelle
+ * des Reiters MQTT, also dort, wo jemand liest statt nachschlaegt.
+ */
+function ev_kachelname($text)
+{
+    $t = trim((string) $text);
+    $i = strpos($t, ' (');
+    if ($i !== false && $i > 0) { $t = substr($t, 0, $i); }
+    return rtrim($t, ' .,;:');
+}
+
 function ev_vorlage_ein()
 {
     $cmds = array();
     foreach (ev_felder_zeile() as $name => $d) {
         $text = ev_t($d['text']);
         if (isset($d['nr'])) { $text = sprintf($text, (int) $d['nr']); }
-        $text = trim(strip_tags(html_entity_decode($text, ENT_QUOTES, 'UTF-8')));
+        $text = ev_kachelname(strip_tags(html_entity_decode($text, ENT_QUOTES, 'UTF-8')));
         if ($d['einheit'] !== '') { $text .= ' [' . $d['einheit'] . ']'; }
-        if ($d['quelle'] === 'doku') { $text .= ' (neu in 0.9.11)'; }
+        /* Der Vorbehalt ohne Fassungsnummer: "neu in 0.9.11" las sich in
+         * Loxone Config wie eine Fassungsnotiz und war fuenfzehn Nummern
+         * spaeter schlicht falsch. Derselbe Wortlaut wie an der
+         * Ausgangsvorlage - ein Vorbehalt, eine Formulierung. */
+        if ($d['quelle'] === 'doku') { $text .= ' (ungemessen)'; }
         $cmds[] = array(
             // Das Semikolon gehoert ins Suchmuster. Jedes Feld steht in der
             // Zeile hinter einem ';' - ohne es traefe ein kuenftiger Feldname,
@@ -1839,14 +2037,27 @@ function ev_vorlage_aus()
 
     $cmds = array();
     $bauen = function ($aktion, $b, $lp) use (&$cmds, $frage) {
-        // Der Titel darf kein '=' tragen - bis 0.9.10 hiess der Ausgang
-        // "EVCC_MODUS_LP=1", weil nur das '&' ersetzt wurde.
-        $titel = 'EVCC_' . strtoupper($aktion) . ($lp ? '_LP' . $lp : '');
-        $text = trim(strip_tags(html_entity_decode(ev_t($b['text']), ENT_QUOTES, 'UTF-8')));
+        /* Der Titel darf kein '=' tragen - bis 0.9.10 hiess der Ausgang
+         * "EVCC_MODUS_LP=1", weil nur das '&' ersetzt wurde.
+         *
+         * Und er traegt seit 0.9.27 den Vorsatz SET_. In der Bausteinsuche
+         * von Loxone Config fehlt der Geraeteknoten; Eingang und Ausgang
+         * stehen dort nebeneinander. Gemessen an 0.9.26: von 141 Titeln
+         * beider Vorlagen waren 140 verschieden - das Feld
+         * 'entladeregelung' und der gleichnamige Befehl ergaben zweimal
+         * EVCC_ENTLADEREGELUNG. Der Vorsatz loest die Klasse statt des
+         * Einzelfalls und fasst dabei NUR die Titel der Ausgangsvorlage an:
+         * Feldnamen, Statuszeile, MQTT-Themen und jede Befehlserkennung
+         * bleiben unveraendert. Vorbild FB_SET_ in Beschattung_Fensterbilanz
+         * 0.12.6. */
+        $titel = 'EVCC_SET_' . strtoupper($aktion) . ($lp ? '_LP' . $lp : '');
+        $text = ev_kachelname(strip_tags(html_entity_decode(ev_t($b['text']), ENT_QUOTES, 'UTF-8')));
         if ($b['quelle'] === 'doku') {
             // Ein Befehl, den niemand gemessen hat, wird als solcher
-            // gekennzeichnet - auch in Loxone Config.
-            $text .= ' (neu in 0.9.11, an keiner Anlage gemessen)';
+            // gekennzeichnet - auch in Loxone Config. Wortgleich mit der
+            // Eingangsvorlage und ohne Fassungsnummer: der Vorbehalt
+            // veraltet nicht, eine Nummer schon.
+            $text .= ' (ungemessen)';
         }
         $adr = $frage . $aktion . ($lp ? '&lp=' . $lp : '');
         $c = array('title' => $titel, 'comment' => $text,
@@ -1900,14 +2111,36 @@ function ev_vorlage_aus()
 
 function ev_sprache()
 {
-    $s = 'de';
-    if (class_exists('LBSystem', false) && method_exists('LBSystem', 'lblanguage')) {
-        $s = LBSystem::lblanguage();
-    } elseif (getenv('LBLANG')) {
-        $s = getenv('LBLANG');
+    static $ev_s = null;
+    if ($ev_s !== null) { return $ev_s; }
+    $s = '';
+    /* Drei Quellen, in dieser Reihenfolge - LBLANG behaelt den Vorrang.
+     *
+     * Die dritte ist die entscheidende: im Cron und im Abrufdienst ist
+     * LBSystem nicht geladen und LBLANG setzt niemand. Ohne Base.Lang faellt
+     * der Dienst auf seine eingebaute Vorgabe zurueck, und seit die
+     * Netzfehlertexte uebersetzt werden, stuende die Meldung in
+     * LETZTER_FEHLER dann auf Deutsch in einer englischen Anlage. */
+    if (getenv('LBLANG')) {
+        $s = (string) getenv('LBLANG');
+    } elseif (class_exists('LBSystem', false) && method_exists('LBSystem', 'lblanguage')) {
+        $s = (string) LBSystem::lblanguage();
+    } else {
+        $p = ev_paths();
+        if ($p['home'] !== '') {
+            $g = @json_decode((string) @file_get_contents(
+                $p['home'] . '/config/system/general.json'), true);
+            foreach (array('Base', 'base') as $k) {
+                if (isset($g[$k]) && is_array($g[$k]) && isset($g[$k]['Lang'])) {
+                    $s = (string) $g[$k]['Lang'];
+                    break;
+                }
+            }
+        }
     }
-    $s = strtolower(substr((string) $s, 0, 2));
-    return in_array($s, array('de', 'en'), true) ? $s : 'en';
+    $s = strtolower(substr($s, 0, 2));
+    $ev_s = in_array($s, array('de', 'en'), true) ? $s : 'de';
+    return $ev_s;
 }
 
 function ev_t($schluessel)
@@ -1989,8 +2222,13 @@ function ev_befehle()
         'prioritaet' => array('ebene' => 'lp', 'methode' => 'POST',
             'pfad' => '/api/loadpoints/%LP%/priority/%WERT%', 'pruef' => 'ganz',
             'min' => 0, 'max' => 10, 'text' => 'AUS.PRIORITAET', 'quelle' => 'bestand', 'analog' => 1),
+        /* min/max der drei 'zahl'-Befehle sind eine WAHL DIESES PLUGINS,
+         * keine gemessene Schranke von EVCC: sie sollen einen verrutschten
+         * Analogausgang abfangen, nicht eine sinnvolle Eingabe verhindern.
+         * Preise in der Waehrung des Tarifs je kWh, Energie in kWh. */
         'smartcostlimit' => array('ebene' => 'lp', 'methode' => 'POST',
             'pfad' => '/api/loadpoints/%LP%/smartcostlimit/%WERT%', 'pruef' => 'zahl',
+            'min' => -10, 'max' => 10,
             'text' => 'AUS.SMARTCOSTLIMIT', 'quelle' => 'bestand', 'analog' => 1),
         'batterieboost' => array('ebene' => 'lp', 'methode' => 'POST',
             'pfad' => '/api/loadpoints/%LP%/batteryboost/%WERT%', 'pruef' => 'schalter',
@@ -2028,6 +2266,7 @@ function ev_befehle()
             'text' => 'AUS.PLANAUS', 'quelle' => 'doku', 'analog' => 0),
         'limitenergie' => array('ebene' => 'lp', 'methode' => 'POST',
             'pfad' => '/api/loadpoints/%LP%/limitenergy/%WERT%', 'pruef' => 'zahl',
+            'min' => 0, 'max' => 500,
             'text' => 'AUS.LIMITENERGIE', 'quelle' => 'doku', 'analog' => 1),
         'fahrzeug' => array('ebene' => 'lp', 'methode' => 'POST',
             'pfad' => '/api/loadpoints/%LP%/vehicle/%WERT%', 'pruef' => 'name',
@@ -2037,6 +2276,7 @@ function ev_befehle()
             'text' => 'AUS.FAHRZEUGAUS', 'quelle' => 'doku', 'analog' => 0),
         'netzladegrenze' => array('ebene' => 'anlage', 'methode' => 'POST',
             'pfad' => '/api/batterygridchargelimit/%WERT%', 'pruef' => 'zahl',
+            'min' => -10, 'max' => 10,
             'text' => 'AUS.NETZLADEGRENZE', 'quelle' => 'doku', 'analog' => 1),
         'netzladenaus' => array('ebene' => 'anlage', 'methode' => 'DELETE',
             'pfad' => '/api/batterygridchargelimit', 'pruef' => 'ohne',
@@ -2062,8 +2302,15 @@ function ev_befehl_pruefen($b, $wert)
     if ($art === 'ohne') { return array(1, '-'); }
 
     if ($art === 'modus') {
-        $m = is_numeric($zahl) ? ev_modus_text($ganz) : strtolower(trim((string) $wert));
-        if (!in_array($m, array('off', 'now', 'minpv', 'pv'), true)) {
+        /* isset() ist der ganze Unterschied. Bis 0.9.26 stand hier
+         * ev_modus_text($ganz), und das faellt fuer JEDE unbekannte Zahl auf
+         * 'off' zurueck: gemessen gingen 4, 7, 99 und -3 mit OK=1 durch und
+         * BEENDETEN die Ladung. Zwei Zeilen tiefer, bei batteriemodus, war es
+         * von Anfang an richtig. */
+        $k = ev_modus_liste();
+        $m = (is_numeric($zahl) && isset($k[$ganz]))
+             ? $k[$ganz] : strtolower(trim((string) $wert));
+        if (!in_array($m, $k, true)) {
             return array(0, 'MODUS_UNGUELTIG;ERLAUBT=off,now,minpv,pv,0,1,2,3');
         }
         return array(1, $m);
@@ -2094,7 +2341,22 @@ function ev_befehl_pruefen($b, $wert)
     }
     if ($art === 'zahl') {
         if (!is_numeric($zahl)) { return array(0, 'KEINE_ZAHL'); }
-        return array(1, (string) (float) $zahl);
+        $z = (float) $zahl;
+        /* Grenzen auswerten, wo die Befehlstabelle welche nennt. Bis 0.9.26
+         * kannte 'zahl' keine: gemessen gingen eine negative
+         * Ladeenergiegrenze und eine Preisgrenze von einer Milliarde
+         * ungeprueft an EVCC - und alle drei Befehle dieser Art sind
+         * Analogausgaenge in der Loxone-Vorlage, also genau die Stelle, an
+         * der ein falsch verdrahteter Baustein ankommt. */
+        if (isset($b['min']) && $z < (float) $b['min']) {
+            return array(0, 'BEREICH;ERLAUBT=' . $b['min'] . '..'
+                            . (isset($b['max']) ? $b['max'] : ''));
+        }
+        if (isset($b['max']) && $z > (float) $b['max']) {
+            return array(0, 'BEREICH;ERLAUBT=' . (isset($b['min']) ? $b['min'] : '')
+                            . '..' . $b['max']);
+        }
+        return array(1, (string) $z);
     }
     if ($art === 'name') {
         // Fahrzeugnamen sind undurchsichtige Kennungen. Nichts entfernen,
@@ -2178,11 +2440,18 @@ function ev_zusatz_holen($erzwingen = false)
             }
         }
         if ($preise) {
-            $jetzt = $preise[0];
-            $sortiert = $preise;
-            sort($sortiert);
+            /* Der Rang gilt fuer die LAUFENDE Stunde, nicht fuer den ersten
+             * Eintrag der Liste. Dass EVCC immer ab "jetzt" liefert, ist
+             * nirgends gemessen; wo die Stunde nicht zu finden ist, bleibt
+             * der erste Eintrag der Rueckfall - dann steht es wenigstens an
+             * einer Stelle. */
+            $ev_h = (int) date('G');
+            $ev_i = array_search($ev_h, $stunden, true);
+            $jetzt = ($ev_i !== false && isset($preise[$ev_i])) ? $preise[$ev_i] : $preise[0];
+            // Zaehlen, nicht sortieren: das sort() war fuer diese Schleife
+            // ohne Wirkung und liess die Stelle sortierabhaengig aussehen.
             $rang = 1;
-            foreach ($sortiert as $p) { if ($p < $jetzt) { $rang++; } }
+            foreach ($preise as $p) { if ($p < $jetzt) { $rang++; } }
             $besti = array_search(min($preise), $preise, true);
             $lox['preis'] = array(
                 'min' => min($preise), 'max' => max($preise),
@@ -2276,7 +2545,7 @@ function ev_selbsttest_endpunkt($aktion = 'status')
             && preg_match('#\s(\d{3})\s#', $http_response_header[0], $m)) {
             $code = (int) $m[1];
         }
-        if ($body === false) { return array(0, $code, 'keine Antwort', $url); }
+        if ($body === false) { return array(0, $code, ev_t('FEHLER.KEINE_ANTWORT'), $url); }
     }
     $erste = trim(strtok((string) $body, "\n"));
     if ($erste === '' && $code >= 500) {
@@ -2304,6 +2573,64 @@ function ev_selbsttest_endpunkt($aktion = 'status')
  *
  * Rueckgabe: array(Konfiguration|null, Beanstandungen[], uebernommene Werte).
  */
+/**
+ * Taugt der Wert ueberhaupt fuer eine Einstellung dieses Plugins?
+ *
+ * Die erste von zwei Pruefungen: Form, nicht Bedeutung. Bis 0.9.26 gab es
+ * keine - gemessen wurden aus einer Sicherungsdatei ein Feld als URL, ein
+ * Text als Takt, ein Nullbyte im Passwort und ein Zeilenumbruch im
+ * MQTT-Thema anstandslos uebernommen.
+ */
+function ev_wert_taugt($v)
+{
+    if (is_array($v) || is_object($v) || is_bool($v) || is_null($v)) { return false; }
+    $s = (string) $v;
+    if (strlen($s) > 4096) { return false; }
+    // Steuerzeichen ohne den einfachen Zeilenumbruch: die Konfiguration ist
+    // JSON, aber Werte daraus landen in HTTP-Kopfzeilen und MQTT-Zeilen.
+    return preg_match('/[\x00-\x1F\x7F]/', $s) !== 1;
+}
+
+/**
+ * Ist der Wert fuer DIESE Einstellung zulaessig?
+ *
+ * Die zweite Pruefung, gegen dieselbe Positivliste, die auch das Formular
+ * benutzt. Fail closed: ein Schluessel ohne Regel wird NICHT angenommen -
+ * der Reiter Test zaehlt nach, ob jede Vorgabe eine Regel hat, damit ein
+ * neuer Schluessel nicht stillschweigend das Zurueckspielen bricht.
+ */
+function ev_wert_pruefen($schluessel, $wert)
+{
+    $s = trim((string) $wert);
+    switch ($schluessel) {
+        case 'url':
+            return $s !== '' && preg_match(
+                '#^https?://[A-Za-z0-9\.\-]+(:[0-9]{1,5})?(/\S*)?$#', $s) === 1;
+        case 'passwort':
+            return strlen($s) <= 256;
+        case 'aktionstoken':
+            // Weit gefasst: alles, was ohne Kodierung in eine Adresse passt.
+            // Ein zu enges Muster verwirft ein gueltiges Token, und der
+            // Schaden ist derselbe wie bei einem verlorenen.
+            return preg_match('/^[A-Za-z0-9_.\-]{0,64}$/', $s) === 1;
+        case 'mqtt_topic':
+            return preg_match('#^[A-Za-z0-9_/\-]{1,64}$#', $s) === 1;
+        case 'takt':
+            return preg_match('/^[0-9]{1,3}$/', $s) === 1
+                   && (int) $s >= 5 && (int) $s <= 60;
+        case 'ladepunkte':
+            return preg_match('/^[0-9]{1,2}$/', $s) === 1 && (int) $s <= EV_LADEPUNKTE;
+        case 'fahrzeuge':
+            return preg_match('/^[0-9]{1,2}$/', $s) === 1 && (int) $s <= EV_FAHRZEUGE;
+        case 'steuerung_ein':
+        case 'mqtt_ein':
+        case 'tarife_ein':
+        case 'update_ein':
+            return in_array($s, array('0', '1'), true);
+    }
+    return false;
+}
+
 function ev_sicherung_lesen($roh)
 {
     $mangel = array();
@@ -2315,12 +2642,27 @@ function ev_sicherung_lesen($roh)
     $bekannt = array_keys($neu);
     $anzahl = 0;
     foreach ($daten as $k => $w) {
-        if (!in_array($k, $bekannt, true)) {
-            $mangel[] = sprintf(ev_t('EINST.SICH_FREMD'),
-                                 htmlspecialchars((string) $k, ENT_QUOTES, 'UTF-8'));
+        /* Der lesbare Kopf wird UEBERGANGEN, nicht beanstandet. Er ist keine
+         * Einstellung, sondern die Auskunft, aus welcher Anlage und aus
+         * welcher Fassung die Datei stammt. Bis 0.9.26 hat der Leser ihn als
+         * fremden Schluessel abgelehnt - und damit die eigene Sicherung,
+         * sobald sie einen bekam. */
+        if ((string) $k !== '' && substr((string) $k, 0, 1) === '_') {
             continue;
         }
-        $neu[$k] = $w;
+        if (!in_array($k, $bekannt, true)) {
+            $mangel[] = sprintf(ev_t('EINST.SICH_FREMD'), ev_e((string) $k));
+            continue;
+        }
+        if (!ev_wert_taugt($w)) {
+            $mangel[] = sprintf(ev_t('EINST.SICH_WERT_FORM'), ev_e((string) $k));
+            continue;
+        }
+        if (!ev_wert_pruefen($k, $w)) {
+            $mangel[] = sprintf(ev_t('EINST.SICH_WERT_UNZULAESSIG'), ev_e((string) $k));
+            continue;
+        }
+        $neu[$k] = is_string($w) ? trim($w) : $w;
         $anzahl++;
     }
     if ($anzahl === 0) {

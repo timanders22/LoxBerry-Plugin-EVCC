@@ -68,6 +68,21 @@ $modus = isset($argv[1]) ? (string) $argv[1] : 'einmal';
 function ev_durchlauf($laut = false)
 {
     $st = ev_state(true);
+    /* Preisvorschau, Solarprognose und Statistik nachziehen.
+     *
+     * Bis 0.9.26 stand diese Zeile hier NICHT. Einziger Aufrufer von
+     * ev_zusatz_holen() war der Knopf im Reiter Test - im Betrieb blieben
+     * damit neun Felder dauerhaft auf 0: PROGNOSE_HEUTE/MORGEN/UEBERMORGEN
+     * und PREIS_MIN/MAX/SCHNITT/RANG/STUNDEN/GUENSTIGSTE_STUNDE. Gemessen am
+     * 04.09.2026 gegen ein antwortendes EVCC: ein Dienstlauf stellte genau
+     * eine Anfrage (/api/state), und die Statuszeile trug fuer alle neun
+     * eine Null. Die Oberflaeche empfiehlt zugleich woertlich
+     * "EVCC_PREIS_RANG kleiner gleich 6" - bei Rang 0 ist das immer wahr,
+     * also Dauerfreigabe. Ein echter Rang faengt bei 1 an.
+     *
+     * Die Funktion bremst sich ueber EV_ZUSATZ_ALTER (300 s) selbst; sie
+     * fragt also nicht bei jedem Durchlauf nach. */
+    ev_zusatz_holen();
     $werte = ev_werte($st);
     $n = ev_mqtt_publish($werte);
     if ($laut) {
@@ -107,6 +122,21 @@ if ($modus !== 'cron') {
 
 // Nur ein Lauf gleichzeitig. Ohne Sperre stapeln sich bei einer langsamen
 // EVCC-Antwort die Durchlaeufe, bis nichts mehr geht.
+/* Die Fehlerdatei des Cron kappen, bevor der Lauf beginnt.
+ *
+ * cron.01min leitet die FEHLERausgabe nach log/plugins/<ordner>/cron.err -
+ * richtig so, denn bis 0.9.8 ging genau diese Auskunft nach /dev/null und
+ * verdeckte einen Fehler ueber mehrere Fassungen. Nur wurde die Datei
+ * nirgends begrenzt: bei einer Dauerstoerung waechst sie jede Minute weiter,
+ * und log/ liegt auf dem LoxBerry auf einer Ramdisk. Dieselbe Regel wie fuer
+ * evcc.log, an derselben Stelle im Code wie der Lauf, der sie fuellt. */
+$ev_cronerr = dirname(ev_paths()['log']) . '/cron.err';
+clearstatcache(true, $ev_cronerr);
+if (is_file($ev_cronerr) && filesize($ev_cronerr) > 262144) {
+    $ev_rest = array_slice(file($ev_cronerr, FILE_IGNORE_NEW_LINES) ?: array(), -200);
+    @file_put_contents($ev_cronerr, implode("\n", $ev_rest) . "\n");
+}
+
 $sperre = ev_tmpdir() . '/abruf.lock';
 $fh = @fopen($sperre, 'c');
 if ($fh === false) {
