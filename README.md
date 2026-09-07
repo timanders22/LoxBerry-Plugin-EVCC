@@ -9,6 +9,11 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.28
+
+Ein Wort in der erzeugten Loxone-Vorlage: „muessen" heißt jetzt „müssen".
+Sichtbar war es in Loxone Config als Anzeigename.
+
 ## Neu in 0.9.27
 
 Eine Durchsicht der veröffentlichten 0.9.26 hat 38 Punkte ergeben; behoben
