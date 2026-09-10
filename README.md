@@ -9,6 +9,54 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.30
+
+**Behebt eine schwere Regression aus 0.9.29: die Oberfläche brauchte 19
+Sekunden.** Wer 0.9.29 eingespielt hat, sollte 0.9.30 nachziehen.
+
+Gemessen am 10.09.2026 auf einem LoxBerry mit EVCC 0.315.0-dev, unmittelbar
+nach der Installation von 0.9.29:
+
+```
+http://<loxberry>/admin/plugins/evcc/index.php   HTTP 200 nach 19,37 s
+```
+
+Die Seite war nie kaputt — sie war unbenutzbar langsam. Die Ursache, einzeln
+nachgemessen:
+
+| Aufruf | Dauer |
+|---|---|
+| `apt-mark showhold` | 7,85 s |
+| `apt-cache policy evcc` | 8,57 s |
+| `dpkg --get-selections evcc` | 0,06 s |
+| die Summe im Reiter Test | 16,95 s |
+
+0.9.29 hatte für die neue Frage *Welche Fassung würde der Knopf einspielen?*
+zwei apt-Aufrufe eingeführt. Der Reiter *Test* ist aber Teil **derselben**
+Seite wie alle anderen Reiter — die beiden Aufrufe liefen deshalb bei jedem
+Seitenaufruf. Ein Werkzeug mit siebzehn Sekunden Laufzeit gehört nicht an
+einen Seitenaufbau.
+
+Zwei Änderungen:
+
+* **Die Sperre wird über `dpkg` gelesen, nicht über `apt-mark`.** Beide lesen
+  denselben Zustand aus `/var/lib/dpkg/status`, aber `apt-mark` lädt dazu den
+  ganzen Paketbestand. Die Reihenfolge war schlicht falsch herum.
+* **Die Fassung, die apt einspielen würde, bestimmt der Abrufdienst**, höchstens
+  einmal je Stunde, und legt sie unter `/tmp/evcc/apt_kandidat.txt` ab. Die
+  Oberfläche liest nur noch das Ergebnis. Steht nichts Frisches bereit, sagt
+  sie über den Kandidaten **nichts** — „konnte ich nicht feststellen" und „es
+  gibt keinen" bleiben unterscheidbar. Nach einem Update wird die hinterlegte
+  Zahl weggeworfen; der nächste Lauf des Abrufdienstes holt sie innerhalb
+  einer Minute nach.
+
+Am Gerät nachgemessen: **19,37 s → 2,10 s**, `ev_update_lage()` von 16,95 s auf
+0,05 s. Der Abrufdienst legte den Kandidaten `0.315.0` ab.
+
+Bei der Gelegenheit am selben Gerät belegt, was 0.9.29 eingeführt hatte:
+`mosquitto_sub -t 'evcc2lox/#' --retained-only` liefert **46** zurückbehaltene
+Themen — genau die 46, die die Tabelle vorsieht.
+
 ## Neu in 0.9.29
 
 Alles in diesem Abschnitt ist am 10.09.2026 an einem laufenden LoxBerry mit

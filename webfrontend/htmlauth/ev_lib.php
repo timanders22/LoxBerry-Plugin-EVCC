@@ -1640,21 +1640,28 @@ function ev_update_moeglich()
  */
 function ev_paket_gehalten()
 {
-    $aus = array();
-    $rc = 1;
-    @exec('LC_ALL=C apt-mark showhold 2>/dev/null', $aus, $rc);
-    if ($rc === 0) {
-        foreach ($aus as $z) {
-            if (trim($z) === 'evcc') { return 1; }
-        }
-        return 0;
-    }
+    /* dpkg ZUERST. Beide lesen denselben Zustand aus /var/lib/dpkg/status,
+     * aber apt-mark laedt dazu den ganzen Paketbestand. Gemessen am
+     * 10.09.2026 auf dem LoxBerry:
+     *     dpkg --get-selections evcc   0,06 s
+     *     apt-mark showhold            7,85 s
+     * In 0.9.29 stand apt-mark zuerst - zusammen mit dem Kandidaten kostete
+     * das jeden Seitenaufruf 17 Sekunden. */
     $aus = array();
     $rc = 1;
     @exec('LC_ALL=C dpkg --get-selections evcc 2>/dev/null', $aus, $rc);
     if ($rc === 0 && $aus) {
         foreach ($aus as $z) {
             if (preg_match('/^evcc\s+hold$/', trim($z))) { return 1; }
+            if (preg_match('/^evcc\s+\S+$/', trim($z))) { return 0; }
+        }
+    }
+    $aus = array();
+    $rc = 1;
+    @exec('LC_ALL=C apt-mark showhold 2>/dev/null', $aus, $rc);
+    if ($rc === 0) {
+        foreach ($aus as $z) {
+            if (trim($z) === 'evcc') { return 1; }
         }
         return 0;
     }
@@ -1672,18 +1679,46 @@ function ev_paket_gehalten()
  * LC_ALL=C, weil apt seine Feldnamen uebersetzt; ohne das findet das Muster
  * auf einem deutschen System nichts und die Zeile schwiege still.
  */
-function ev_apt_kandidat()
+function ev_apt_kandidat($frisch = false)
 {
+    $datei = ev_tmpdir() . '/apt_kandidat.txt';
+
+    /* Der Regelfall: NUR lesen. Der Aufruf selbst kostet auf dem Geraet
+     * ueber acht Sekunden (gemessen 10.09.2026: apt-cache policy evcc
+     * 8,57 s), weil apt dafuer den ganzen Paketbestand einliest. An einem
+     * Seitenaufruf hat er deshalb nichts zu suchen - in 0.9.29 hing er
+     * dort und machte die Oberflaeche mit 19 Sekunden unbenutzbar.
+     *
+     * Steht nichts Frisches bereit, wird '' zurueckgegeben und die
+     * Oberflaeche sagt nichts ueber den Kandidaten. Das ist "konnte ich
+     * nicht feststellen", nicht "es gibt keinen" - beides bleibt
+     * unterscheidbar. */
+    if (!$frisch) {
+        clearstatcache(true, $datei);
+        if (is_file($datei) && (time() - (int) @filemtime($datei)) < 3600) {
+            return trim((string) @file_get_contents($datei));
+        }
+        return '';
+    }
+
+    /* Bestimmt wird die Zahl vom Abrufdienst, hoechstens einmal je Stunde.
+     * Geschrieben wird auch ein LEERES Ergebnis: sonst versuchte es der
+     * naechste Lauf sofort wieder, und auf einer Maschine ohne apt liefe
+     * jede Minute ein Fehlversuch. */
     $aus = array();
     $rc = 1;
     @exec('LC_ALL=C apt-cache policy evcc 2>/dev/null', $aus, $rc);
-    if ($rc !== 0) { return ''; }
-    foreach ($aus as $z) {
-        if (preg_match('/^\s*Candidate:\s*(\S+)/', $z, $m)) {
-            return ($m[1] === '(none)') ? '' : $m[1];
+    $wert = '';
+    if ($rc === 0) {
+        foreach ($aus as $z) {
+            if (preg_match('/^\s*Candidate:\s*(\S+)/', $z, $m)) {
+                $wert = ($m[1] === '(none)') ? '' : $m[1];
+                break;
+            }
         }
     }
-    return '';
+    @file_put_contents($datei, $wert);
+    return $wert;
 }
 
 /**
@@ -1780,6 +1815,11 @@ function ev_update_ausfuehren()
     if (!ev_update_moeglich()) {
         return array(0, sprintf(ev_t('TEST.M_UPDATE_KEIN_SKRIPT'), EV_UPDATE_SKRIPT));
     }
+    /* Nach einem Lauf stimmt der hinterlegte Kandidat nicht mehr. Er
+     * wird weggeworfen, nicht neu bestimmt: der naechste Cron-Lauf holt
+     * ihn innerhalb einer Minute nach, und der Knopf wird nicht um acht
+     * Sekunden laenger. */
+    @unlink(ev_tmpdir() . '/apt_kandidat.txt');
     $vorher = ev_dienst_version();
     $aus = array();
     $rc = 0;

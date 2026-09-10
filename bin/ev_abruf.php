@@ -130,6 +130,19 @@ if ($modus !== 'cron') {
  * nirgends begrenzt: bei einer Dauerstoerung waechst sie jede Minute weiter,
  * und log/ liegt auf dem LoxBerry auf einer Ramdisk. Dieselbe Regel wie fuer
  * evcc.log, an derselben Stelle im Code wie der Lauf, der sie fuellt. */
+/* Hoechstens einmal je Stunde bestimmen, welche Fassung apt einspielen
+ * wuerde. Der Aufruf kostet ueber acht Sekunden (gemessen 10.09.2026 auf
+ * dem LoxBerry: apt-cache policy evcc 8,57 s) und gehoert deshalb
+ * hierher und nicht an einen Seitenaufruf - die Oberflaeche liest nur
+ * noch das Ergebnis. In 0.9.29 hing er am Seitenaufbau und machte die
+ * Oberflaeche mit 19 Sekunden unbenutzbar. */
+$ev_kandidatdatei = ev_tmpdir() . '/apt_kandidat.txt';
+clearstatcache(true, $ev_kandidatdatei);
+if (!is_file($ev_kandidatdatei)
+    || (time() - (int) @filemtime($ev_kandidatdatei)) >= 3600) {
+    ev_apt_kandidat(true);
+}
+
 $ev_cronerr = dirname(ev_paths()['log']) . '/cron.err';
 clearstatcache(true, $ev_cronerr);
 if (is_file($ev_cronerr) && filesize($ev_cronerr) > 262144) {
