@@ -1,0 +1,8 @@
+# Was eingecheckt ist, wird auch ausgeliefert. Keine Umschreibung.
+#
+# Ohne diese Zeile normalisiert Git beim Erzeugen des Tag-Archivs die
+# Zeilenenden und liefert LF aus - auch fuer die Dateien, die hier
+# ausdruecklich CRLF fuehren (plugin.cfg, release.cfg, prerelease.cfg,
+# language_de.ini, language_en.ini). Ein Vergleich des Tag-Archivs gegen
+# den Ordner meldet dann Abweichungen, die es im Ordner nicht gibt.
+* -text

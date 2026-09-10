@@ -1,0 +1,16 @@
+# Uebersetzte Python-Zwischenstaende und Editorreste gehoeren nicht ins Paket.
+__pycache__/
+*.pyc
+*.pyo
+
+# Betriebssystem- und Editorreste
+.DS_Store
+Thumbs.db
+*~
+*.swp
+
+# Protokolle. Ein Probelauf im Arbeitsordner legt log/plugins/evcc/ an;
+# ohne diese Regel wandert die Datei beim naechsten Schub in den Tag. Genau
+# so ist am 06.09.2026 eine heimkino.log in v1.3.5 gelangt.
+log/
+*.log
