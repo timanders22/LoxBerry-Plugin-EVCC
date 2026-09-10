@@ -637,14 +637,16 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 
 <h3><?= ev_e(ev_t('MQTT.H_THEMEN')) ?></h3>
 <p class="sm-hilfe"><?= ev_t('MQTT.THEMEN_TEXT') ?></p>
+<p class="sm-hilfe"><?= ev_t('MQTT.RETAIN_TEXT') ?></p>
 <table class="sm-tbl">
-<tr><th><?= ev_e(ev_t('MQTT.T_THEMA')) ?></th><th><?= ev_e(ev_t('MQTT.T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('MQTT.T_EVCC')) ?></th></tr>
+<tr><th><?= ev_e(ev_t('MQTT.T_THEMA')) ?></th><th><?= ev_e(ev_t('MQTT.T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('MQTT.T_RETAIN')) ?></th><th><?= ev_e(ev_t('MQTT.T_EVCC')) ?></th></tr>
 <?php foreach (ev_felder() as $ev_name => $ev_d) {
     $ev_txt = ev_t($ev_d['text']);
     if (isset($ev_d['nr'])) { $ev_txt = sprintf($ev_txt, (int) $ev_d['nr']); } ?>
 <tr>
   <td><span class="sm-mono"><?= ev_e($ev_cfg['mqtt_topic']) ?>/<?= ev_e($ev_name) ?></span></td>
   <td><?= $ev_txt ?><?= $ev_d['einheit'] !== '' ? ' <span class="sm-mono">' . ev_e($ev_d['einheit']) . '</span>' : '' ?></td>
+  <td><?= ev_e(ev_t(ev_retain_fuer($ev_name) ? 'MQTT.RETAIN_JA' : 'MQTT.RETAIN_NEIN')) ?></td>
   <td><span class="sm-mono"><?= ev_e($ev_d['mqtt'] !== '' ? $ev_d['mqtt'] : '-') ?></span></td>
 </tr>
 <?php } ?>

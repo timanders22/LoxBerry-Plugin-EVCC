@@ -221,14 +221,24 @@ function ev_pruefungen()
      * Ein Hinweis, kein Kreuz: wer die Option nicht eingeschaltet hat,
      * vermisst nichts. Fehlt aber das Skript, OBWOHL die Option an ist, ist
      * das ein Befund - der Knopf koennte dann nie wirken. */
+    $ev_lage = ev_update_lage();
     if (empty($cfg['update_ein'])) {
         $z[] = ev_pruefzeile(-1, ev_t('TEST.F_UPDATE'), ev_t('TEST.A_UPDATE_AUS'));
-    } elseif (ev_update_moeglich()) {
-        $z[] = ev_pruefzeile(1, ev_t('TEST.F_UPDATE'),
-            sprintf(ev_t('TEST.A_UPDATE_BEREIT'), EV_UPDATE_SKRIPT));
-    } else {
+    } elseif ($ev_lage['skript'] !== 1) {
         $z[] = ev_pruefzeile(0, ev_t('TEST.F_UPDATE'),
             sprintf(ev_t('TEST.A_UPDATE_KEIN_SKRIPT'), EV_UPDATE_SKRIPT));
+    } elseif ($ev_lage['gehalten'] === 1) {
+        $z[] = ev_pruefzeile(0, ev_t('TEST.F_UPDATE'), ev_t('TEST.A_UPDATE_GEHALTEN'));
+    } elseif ($ev_lage['gehalten'] === -1) {
+        $z[] = ev_pruefzeile(-1, ev_t('TEST.F_UPDATE'),
+            sprintf(ev_t('TEST.A_UPDATE_UNKLAR'), EV_UPDATE_SKRIPT));
+    } elseif ($ev_lage['kandidat'] !== '') {
+        $z[] = ev_pruefzeile(1, ev_t('TEST.F_UPDATE'),
+            sprintf(ev_t('TEST.A_UPDATE_BEREIT_KAND'), EV_UPDATE_SKRIPT,
+                    ev_e($ev_lage['kandidat'])));
+    } else {
+        $z[] = ev_pruefzeile(1, ev_t('TEST.F_UPDATE'),
+            sprintf(ev_t('TEST.A_UPDATE_BEREIT'), EV_UPDATE_SKRIPT));
     }
 
     /* ---- Erreichbarkeit ---- */
@@ -272,6 +282,24 @@ function ev_pruefungen()
         $z[] = ev_pruefzeile(-1, ev_t('TEST.F_EVCC_NEU'),
             sprintf(ev_t('TEST.A_EVCC_NEU' . ev_update_weg()),
                     ev_e($ein['version']), ev_e($ein['neuer'])));
+    }
+
+    /* ---- Was wuerde der Knopf WIRKLICH einspielen? ----
+     *
+     * Zwei verschiedene Zahlen, die bis 0.9.28 als eine auftraten. EVCCs
+     * 'availableVersion' ist die neueste STABILE Fassung, die EVCC kennt;
+     * eingespielt wird, was die eingetragene Paketquelle anbietet. Gemessen
+     * am 10.09.2026 standen beide gleichzeitig da: EVCC sagte 0.315.0, apt
+     * haette 0.316.0~dev.1788920311 aus der nightly-Quelle genommen.
+     *
+     * Regeln/12 haelt das seit dem 17.08.2026 fest - das Plugin hielt sich
+     * nur nicht daran. */
+    if ($ev_lage['kandidat'] !== '') {
+        $ev_hoeher = ev_fassung_neuer($ev_lage['kandidat'], $ein['version']);
+        $z[] = ev_pruefzeile($ev_hoeher ? -1 : 1, ev_t('TEST.F_APT_KANDIDAT'),
+            sprintf(ev_t($ev_hoeher ? 'TEST.A_APT_KANDIDAT_NEUER'
+                                    : 'TEST.A_APT_KANDIDAT_GLEICH'),
+                    ev_e($ev_lage['kandidat'])));
     }
 
     /* ---- Feldzuordnung: der wichtigste Punkt ----

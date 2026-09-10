@@ -85,6 +85,39 @@ apt-cache policy evcc 2>/dev/null | sed 's/^/  /'
 echo "-----------------------------"
 
 
+# Ein Paket auf "halten" laesst sich mit -y nicht anfassen: apt bricht ab mit
+#   E: Held packages were changed and -y was used without
+#      --allow-change-held-packages.
+# Gemessen am 10.09.2026: zwei Laeufe des Knopfes endeten so mit
+# Rueckgabewert 100, und nirgends stand der Grund. Dieselbe Zeile mit
+# --allow-change-held-packages lief durch (rc=0).
+#
+# Die Sperre wird hier ABSICHTLICH NICHT ueberfahren. Wer sie gesetzt hat,
+# wollte sie - oft ist sie das Einzige, was eine nightly-Quelle aufhaelt.
+# Das Skript sagt sie an und hoert auf.
+GEHALTEN=$(apt-mark showhold 2>/dev/null | grep -x evcc)
+if [ -z "$GEHALTEN" ]; then
+    GEHALTEN=$(dpkg --get-selections evcc 2>/dev/null | grep 'hold$')
+fi
+if [ -n "$GEHALTEN" ]; then
+    echo "ABBRUCH: das Paket evcc steht auf 'halten' (apt-mark hold)."
+    echo "         Solange das so ist, kann apt es nicht aktualisieren -"
+    echo "         jeder Lauf endet mit Rueckgabewert 100."
+    echo "         Aufheben laesst sich die Sperre als root mit:"
+    echo "           apt-mark unhold evcc"
+    echo "         Vorher lohnt der Blick, welche Fassung dann kaeme (siehe"
+    echo "         'Candidate' oben) - aus einer nightly-Quelle ist das eine"
+    echo "         Entwicklerfassung."
+    exit 4
+fi
+
+# Ansagen, WAS eingespielt wuerde. Die Oberflaeche nennt an anderer Stelle
+# EVCCs eigene Angabe 'availableVersion' - das ist die neueste STABILE
+# Fassung, die EVCC kennt, nicht zwangslaeufig die, die apt nimmt. Gemessen
+# am 10.09.2026: EVCC meldete 0.315.0, apt haette 0.316.0~dev eingespielt.
+KANDIDAT=$(apt-cache policy evcc 2>/dev/null | awk '/Candidate:/{print $2}')
+echo "apt wuerde einspielen: ${KANDIDAT:-unbekannt}"
+
 # --force-confold: eine vorhandene /etc/evcc.yaml wird NIEMALS ersetzt.
 # Ohne diese Zeile entscheidet dpkg in einem nicht interaktiven Lauf selbst
 # ueber die Konfiguration des Anwenders.

@@ -549,6 +549,53 @@ function ev_netzfehler($text, $url)
     return $text !== '' ? (string) $text : sprintf(ev_t('FEHLER.KEINE_ANTWORT_VON'), $wirt);
 }
 
+/**
+ * Der Fehlertext zu einer nicht geglueckten Antwort - MIT dem, was die
+ * Gegenstelle selbst sagt.
+ *
+ * Gemessen am 10.09.2026: 'puffersoc' ohne Hausspeicher beantwortete EVCC
+ * mit HTTP 400 und {"error":"battery not configured"}. Beim Anwender kam
+ * nur "HTTP 400 von http://127.0.0.1:7070/api/buffersoc/1" an - die
+ * Begruendung, die alles erklaert, fiel weg. Dieselbe Messung zeigte, dass
+ * ein GET auf denselben Pfad 404 "404 page not found" liefert; auch das ist
+ * ein brauchbarer Satz.
+ *
+ * Der Schluessel heisst 'error', nicht 'message' (Regeln/12, 17.08.2026);
+ * 'message' wird trotzdem gelesen, falls eine spaetere EVCC-Fassung ihn
+ * benutzt. Eine HTML-Seite wird NICHT uebernommen - kommt ein Proxy
+ * dazwischen, stuende sonst eine halbe Fehlerseite in der Statuszeile.
+ */
+function ev_http_fehlertext($code, $url, $body)
+{
+    $t = 'HTTP ' . (int) $code . ' von ' . $url;
+    $b = trim((string) $body);
+    if ($b === '') { return $t; }
+    $sagt = '';
+    $j = json_decode($b, true);
+    if (is_array($j)) {
+        foreach (array('error', 'message', 'Error') as $k) {
+            if (isset($j[$k]) && is_string($j[$k]) && trim($j[$k]) !== '') {
+                $sagt = trim($j[$k]);
+                break;
+            }
+        }
+    }
+    /* Der Rohtext ist NUR fuer Antworten gedacht, die gar kein JSON sind
+     * (gemessen: "404 page not found"). War der Rumpf gueltiges JSON und
+     * stand darin kein brauchbarer Grund, wird nichts angehaengt - sonst
+     * stuende bei {"error":"   "} das ganze rohe JSON in der Statuszeile.
+     * Von der eigenen Eichung gefunden, 10.09.2026. */
+    if ($sagt === '' && !is_array($j)
+        && strlen($b) <= 120 && strpos($b, '<') === false) {
+        $sagt = $b;
+    }
+    if ($sagt === '') { return $t; }
+    $sagt = trim(preg_replace('/\s+/', ' ',
+        str_replace(array("\r", "\n", "\t"), ' ', $sagt)));
+    if ($sagt === '') { return $t; }
+    return $t . ' - EVCC sagt: ' . $sagt;
+}
+
 function ev_http($pfad, $methode = 'GET', $rumpf = null, $zeit = 8)
 {
     $cfg = ev_config();
@@ -585,7 +632,7 @@ function ev_http($pfad, $methode = 'GET', $rumpf = null, $zeit = 8)
         return array('ok' => ($code >= 200 && $code < 300) ? 1 : 0, 'code' => $code,
                      'body' => (string) $body, 'typ' => (string) $typ,
                      'fehler' => ($code >= 200 && $code < 300) ? ''
-                                 : ('HTTP ' . $code . ' von ' . $url));
+                                 : ev_http_fehlertext($code, $url, $body));
     }
 
     $ctx = stream_context_create(array('http' => array(
@@ -618,7 +665,7 @@ function ev_http($pfad, $methode = 'GET', $rumpf = null, $zeit = 8)
     return array('ok' => ($code >= 200 && $code < 300) ? 1 : 0, 'code' => $code,
                  'body' => (string) $body, 'typ' => $typ,
                  'fehler' => ($code >= 200 && $code < 300) ? ''
-                             : ('HTTP ' . $code . ' von ' . $url));
+                             : ev_http_fehlertext($code, $url, $body));
 }
 
 /**
@@ -1421,7 +1468,9 @@ function ev_einrichtung($st = null)
         // Die eigene Fassung traegt einen Commit in Klammern, die angebotene
         // nicht - deshalb wird nur der Teil davor verglichen.
         $eigen = trim(strtok((string) $out['version'], ' '));
-        if ($neu !== '' && $eigen !== '' && $neu !== $eigen) { $out['neuer'] = $neu; }
+        if ($neu !== '' && $eigen !== '' && ev_fassung_neuer($neu, $eigen)) {
+            $out['neuer'] = $neu;
+        }
     }
     return $out;
 }
@@ -1576,6 +1625,125 @@ function ev_update_moeglich()
 }
 
 /**
+ * Steht das Paket evcc auf "halten"?
+ *
+ * Ein gehaltenes Paket laesst sich mit -y nicht anfassen; apt bricht ab mit
+ * "Held packages were changed and -y was used without
+ * --allow-change-held-packages" und Rueckgabewert 100. Gemessen am
+ * 10.09.2026 auf dem LoxBerry: apt-mark showhold meldete evcc, zwei
+ * Knopfdruecke endeten mit 100, und die Selbstpruefung zeigte trotzdem einen
+ * Haken bei "Kann die Oberflaeche EVCC aktualisieren?".
+ *
+ * Zwei Quellen, weil apt-mark auf aelteren Staenden fehlen kann. Rueckgabe:
+ * 1 gehalten, 0 frei, -1 nicht feststellbar - und "nicht feststellbar" ist
+ * ausdruecklich nicht dasselbe wie "frei".
+ */
+function ev_paket_gehalten()
+{
+    $aus = array();
+    $rc = 1;
+    @exec('LC_ALL=C apt-mark showhold 2>/dev/null', $aus, $rc);
+    if ($rc === 0) {
+        foreach ($aus as $z) {
+            if (trim($z) === 'evcc') { return 1; }
+        }
+        return 0;
+    }
+    $aus = array();
+    $rc = 1;
+    @exec('LC_ALL=C dpkg --get-selections evcc 2>/dev/null', $aus, $rc);
+    if ($rc === 0 && $aus) {
+        foreach ($aus as $z) {
+            if (preg_match('/^evcc\s+hold$/', trim($z))) { return 1; }
+        }
+        return 0;
+    }
+    return -1;
+}
+
+/**
+ * Welche Fassung wuerde apt einspielen?
+ *
+ * Das ist die Zahl, die der Knopf wirklich holt - im Unterschied zu EVCCs
+ * eigener Angabe 'availableVersion', die die neueste STABILE Fassung meldet,
+ * die EVCC kennt. Gemessen am 10.09.2026 standen beide Zahlen gleichzeitig
+ * da: EVCC sagte 0.315.0, apt haette 0.316.0~dev.1788920311 genommen.
+ *
+ * LC_ALL=C, weil apt seine Feldnamen uebersetzt; ohne das findet das Muster
+ * auf einem deutschen System nichts und die Zeile schwiege still.
+ */
+function ev_apt_kandidat()
+{
+    $aus = array();
+    $rc = 1;
+    @exec('LC_ALL=C apt-cache policy evcc 2>/dev/null', $aus, $rc);
+    if ($rc !== 0) { return ''; }
+    foreach ($aus as $z) {
+        if (preg_match('/^\s*Candidate:\s*(\S+)/', $z, $m)) {
+            return ($m[1] === '(none)') ? '' : $m[1];
+        }
+    }
+    return '';
+}
+
+/**
+ * Fassungsangabe auf eine vergleichbare Form bringen.
+ *
+ * apt schreibt die Tilde (0.315.0~dev.1786876734+3c25327f7), 'evcc -v' den
+ * Bindestrich (0.315.0-dev+3c25327f7); Regeln/12 haelt beide Schreibweisen
+ * fest. Der Commit-Anhang hinter dem Pluszeichen sagt nichts ueber die
+ * Reihenfolge und faellt weg.
+ */
+function ev_fassung_norm($v)
+{
+    $v = trim((string) $v);
+    $v = preg_replace('/^[^0-9]*/', '', $v);
+    $v = str_replace('~', '-', $v);
+    $v = preg_replace('/\+.*$/', '', $v);
+    return (string) $v;
+}
+
+/**
+ * Ist $angeboten WIRKLICH neuer als $eigen?
+ *
+ * Bis 0.9.28 stand in ev_einrichtung() nur $neu !== $eigen - blosse
+ * Ungleichheit. Damit meldet die Oberflaeche auch einen RUECKSCHRITT als
+ * neuere Fassung. Heute ging das gut aus; sobald einmal 0.316.0-dev
+ * eingespielt ist, meldete dieselbe Zeile 0.315.0 als "neuer".
+ *
+ * version_compare kennt die Ordnung dev < alpha < beta < RC < Release, und
+ * genau die wird hier gebraucht.
+ */
+function ev_fassung_neuer($angeboten, $eigen)
+{
+    $a = ev_fassung_norm($angeboten);
+    $e = ev_fassung_norm($eigen);
+    if ($a === '' || $e === '') { return 0; }
+    return version_compare($a, $e, '>') ? 1 : 0;
+}
+
+/**
+ * Traegt der Weg zum Aktualisieren? Gemessen, nicht vermutet.
+ *
+ * Rueckgabe:
+ *   skript    1/0   liegt /usr/local/sbin/loxberry-evcc-update da?
+ *   gehalten  1/0/-1 steht das Paket auf halten?
+ *   kandidat  ''    was apt einspielen wuerde
+ *   traegt    1/0   beides zusammen: der Knopf kann wirken
+ */
+function ev_update_lage()
+{
+    $skript = ev_update_moeglich() ? 1 : 0;
+    $gehalten = $skript ? ev_paket_gehalten() : -1;
+    return array(
+        'skript'   => $skript,
+        'gehalten' => $gehalten,
+        'kandidat' => $skript ? ev_apt_kandidat() : '',
+        'traegt'   => ($skript === 1 && $gehalten === 0) ? 1 : 0,
+    );
+}
+
+/**
  * Welcher Sprachschluessel beschreibt den Weg zur neueren EVCC-Fassung?
  *
  * Bis 0.9.15 stand unter dem Hinweis auf eine neuere Fassung fest der Satz
@@ -1716,6 +1884,74 @@ function ev_abo_text()
 }
 
 
+/**
+ * Welche Themen gehen ZURUECKBEHALTEN (retained) hinaus?
+ *
+ * Hausstandard seit 03.09.2026: Zustaende retained, damit Loxone nach einem
+ * Neustart des Miniservers oder des Gateways sofort den Stand hat; Messwerte
+ * mit Zeitbezug nicht, damit kein alter Wert als aktuell erscheint; das
+ * Lebenszeichen nie.
+ *
+ * Drei Gruppen, damit ein dritter Ladepunkt nichts von Hand verlangt: die
+ * Ladepunkt- und Fahrzeugnamen werden ohne ihre Nummer nachgeschlagen.
+ *
+ * NICHT in dieser Tabelle stehen mit Absicht:
+ *   ok, alter_s, dienst, betriebsbereit  - das ist das Lebenszeichen. Wer es
+ *       zurueckbehaelt, laesst nach einem gestorbenen Cron fuer immer
+ *       "laeuft" im Broker stehen.
+ *   letzter_fehler, lpN_fahrzeug_name    - im Regelfall LEER. Eine leere
+ *       Nutzlast loescht ein zurueckbehaltenes Thema; ein Thema, das
+ *       ueblicherweise leer ist, gehoert deshalb nicht retained gesendet.
+ *   alle Leistungen, Energien, Preise, Prognosen, Sitzungswerte, der
+ *       gemessene Ladestand und die Restzeiten - Messwerte mit Zeitbezug.
+ */
+function ev_retain_liste()
+{
+    return array(
+        /* Einstellungen der Anlage und das Fehlerflag. */
+        'anlage' => array(
+            'netzladen_aktiv' => 1, 'prioritaets_soc' => 1, 'puffer_soc' => 1,
+            'residualleistung_w' => 1, 'entladeregelung' => 1,
+            'batteriemodus_nr' => 1, 'speicher_kapazitaet_kwh' => 1,
+            'fehler_nr' => 1,
+        ),
+        /* Je Ladepunkt, ohne die Nummer: lp1_modus_nr, lp2_modus_nr, ... */
+        'ladepunkt' => array(
+            'verbunden' => 1, 'laedt' => 1, 'freigegeben' => 1,
+            'plan_aktiv' => 1, 'smartcost_aktiv' => 1, 'modus_nr' => 1,
+            'limit_soc' => 1, 'prioritaet' => 1, 'min_soc' => 1,
+            'minstrom_a' => 1, 'maxstrom_a' => 1, 'smartcost_grenze' => 1,
+            'batterieboost' => 1, 'phasen_soll' => 1, 'pv_warten_min' => 1,
+            'phasen_warten_min' => 1, 'plan_soc' => 1, 'plan_kwh' => 1,
+        ),
+        /* Je Fahrzeug: der eingestellte Ladestand, nicht der gemessene. */
+        'fahrzeug' => array(
+            'limit_soc' => 1,
+        ),
+    );
+}
+
+/**
+ * Geht dieses Feld retained hinaus?
+ *
+ * $nutzlast wird mitgegeben, wo sie schon feststeht: eine LEERE Nutzlast
+ * loescht ein zurueckbehaltenes Thema im Broker ("Delete $udptopic from
+ * memory because of empty message", mqttgateway.pl, sub udpin). Sie geht
+ * deshalb immer als publish hinaus, auch wenn die Tabelle retain sagt.
+ */
+function ev_retain_fuer($name, $nutzlast = null)
+{
+    if ($nutzlast !== null && (string) $nutzlast === '') { return 0; }
+    $l = ev_retain_liste();
+    $n = (string) $name;
+    if (isset($l['anlage'][$n])) { return 1; }
+    if (preg_match('/^lp[0-9]+_(.+)$/', $n, $m)
+        && isset($l['ladepunkt'][$m[1]])) { return 1; }
+    if (preg_match('/^fz[0-9]+_(.+)$/', $n, $m)
+        && isset($l['fahrzeug'][$m[1]])) { return 1; }
+    return 0;
+}
+
 function ev_mqtt_publish($werte = null)
 {
     $cfg = ev_config();
@@ -1744,10 +1980,18 @@ function ev_mqtt_publish($werte = null)
         return 0;
     }
     $n = 0;
+    $behalten = 0;
     foreach ($werte as $name => $d) {
-        $msg = 'publish ' . ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $name)
-             . ' ' . ev_mqtt_nutzlast($d['wert']);
-        if (@fwrite($sock, $msg) !== false) { $n++; }
+        /* Erst die Nutzlast, dann das Verb: eine leere Nutzlast LOESCHT ein
+         * zurueckbehaltenes Thema, sie darf deshalb nie mit retain hinaus. */
+        $nutz = ev_mqtt_nutzlast($d['wert']);
+        $verb = ev_retain_fuer($name, $nutz) ? 'retain' : 'publish';
+        $msg = $verb . ' ' . ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $name)
+             . ' ' . $nutz;
+        if (@fwrite($sock, $msg) !== false) {
+            $n++;
+            if ($verb === 'retain') { $behalten++; }
+        }
     }
     fclose($sock);
     if ($n < count($werte)) {

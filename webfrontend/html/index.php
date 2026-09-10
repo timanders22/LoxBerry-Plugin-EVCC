@@ -365,5 +365,24 @@ ev_log('Befehl ' . $aktion . ' (' . $klar . ') an '
      . ($b['ebene'] === 'lp' ? 'Ladepunkt ' . $lp : 'die Anlage') . ' gesendet');
 // Der zwischengespeicherte Zustand ist jetzt veraltet.
 @unlink(ev_tmpdir() . '/state.json');
-printf("EVCC;OK=1;AKTION=%s;WERT=%s%s\n", $aktion, $klar,
-       $zeit !== '' ? ';ZEIT=' . $zeit : '');
+/* Wurde die Eingabe gerundet? Dann wird es GESAGT.
+ *
+ * Loxone sendet aus einem Analogbaustein zwangslaeufig Kommazahlen. Ein
+ * ganzzahliger Befehl muss sie runden - bis 0.9.28 tat er das STILL.
+ * Gemessen am 10.09.2026: limitsoc=50.5 ging als
+ * /api/loadpoints/1/limitsoc/51 hinaus, in der Antwort stand nur WERT=51.
+ * Abgewiesen wird hier mit Absicht nicht (das machte den Befehl fuer Loxone
+ * unbenutzbar), aber CLAUDE.md Abschnitt 4 verlangt, dass nichts still
+ * zurechtgebogen wird.
+ *
+ * Nur fuer die Befehlsarten, bei denen $klar wirklich dieselbe Zahl ist:
+ * bei 'modus' und 'schalter' ist $klar eine Uebersetzung ('3' -> 'pv'), da
+ * waere ein GERUNDET= irrefuehrend. */
+$gerundet = '';
+if (in_array($b['pruef'], array('ganz', 'plan', 'liste'), true)
+    && is_numeric(str_replace(',', '.', $wert))
+    && (string) $klar !== (string) $wert) {
+    $gerundet = ';GERUNDET=' . str_replace(';', ',', $wert);
+}
+printf("EVCC;OK=1;AKTION=%s;WERT=%s%s%s\n", $aktion, $klar,
+       $gerundet, $zeit !== '' ? ';ZEIT=' . $zeit : '');

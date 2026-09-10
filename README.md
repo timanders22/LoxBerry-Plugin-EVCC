@@ -9,6 +9,98 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.29
+
+Alles in diesem Abschnitt ist am 10.09.2026 an einem laufenden LoxBerry mit
+EVCC 0.315.0-dev gemessen, nicht abgeleitet.
+
+**Der Knopf *EVCC jetzt aktualisieren* konnte nicht wirken — und sagte es
+nicht.** Steht das Paket `evcc` auf halten (`apt-mark hold`), bricht
+`apt-get install -y` mit Rückgabewert 100 ab: *Held packages were changed and
+-y was used without --allow-change-held-packages*. Zwei Knopfdrücke endeten so,
+und im Protokoll stand nur die Zahl 100. Das Aktualisierungsskript erkennt die
+Sperre jetzt **vor** dem Lauf, nennt sie im Klartext und hört auf. Überfahren
+wird sie ausdrücklich nicht — wer sie gesetzt hat, wollte sie; oft ist sie das
+Einzige, was eine nightly-Paketquelle aufhält. Aufheben lässt sie sich als root
+mit `apt-mark unhold evcc`.
+
+**Die Oberfläche nannte eine Fassung und der Knopf holte eine andere.** Unter
+*Gibt es eine neuere EVCC-Fassung?* stand EVCCs eigene Angabe
+`availableVersion` — das ist die neueste **stabile** Fassung, die EVCC kennt.
+Eingespielt wird aber, was `apt` aus allen eingetragenen Paketquellen als
+höchste findet. Gemessen standen beide Zahlen gleichzeitig da: EVCC meldete
+`0.315.0`, `apt` hätte `0.316.0~dev.1788920311` aus der nightly-Quelle
+genommen. Der Reiter *Test* hat dafür jetzt eine eigene, gemessene Zeile:
+*Welche Fassung würde der Knopf einspielen?*
+
+**Ein Rückschritt wurde als neuere Fassung gemeldet.** Verglichen wurde nur auf
+Ungleichheit. Sobald einmal eine Entwicklerfassung `0.316.0-dev` läuft, meldete
+dieselbe Zeile `0.315.0` als „neuer". Der Vergleich kennt jetzt eine Ordnung
+(`dev` < `alpha` < `beta` < `RC` < Release) und beide Schreibweisen — `apt`
+führt die Tilde, `evcc -v` den Bindestrich.
+
+**Ein Haken auf einem gesperrten Weg.** *Kann die Oberfläche EVCC
+aktualisieren?* prüfte nur, ob die Skriptdatei vorhanden ist. Sie fragt jetzt
+zusätzlich, ob das Paket gesperrt ist und welche Fassung die Paketquelle
+anbietet — und unterscheidet „konnte ich nicht feststellen" von „geprüft und in
+Ordnung".
+
+**MQTT: Zustände werden jetzt zurückbehalten.** Bis 0.9.28 ging jedes Thema
+flüchtig hinaus; nach einem Neustart des Miniservers oder des Gateways standen
+die virtuellen Eingänge leer, bis der nächste Abruf lief. Gemessen: unter
+`evcc2lox` kamen in 25 Sekunden 266 Zeilen an, zurückbehalten lag **nichts** —
+während im selben Broker 2331 zurückbehaltene Themen anderer Linien lagen.
+Von den 109 Feldern gehen jetzt **46 zurückbehalten** und 63 flüchtig hinaus:
+
+* **zurückbehalten** — Zustände und Einstellungen: Betriebsart, Grenzen,
+  Ströme, Prioritäten, Pläne, `verbunden`, `lädt`, `freigegeben`, die
+  Speichereinstellungen der Anlage und das Fehlerflag;
+* **flüchtig** — alles mit Zeitbezug: Leistungen, Energien, Preise, Prognosen,
+  Restzeiten, Sitzungswerte und der gemessene Ladestand;
+* **nie zurückbehalten** — das Lebenszeichen `OK`, `ALTER_S`, `DIENST`,
+  `BETRIEBSBEREIT`. Sonst stünde nach einem gestorbenen Abrufdienst für immer
+  „läuft“ im Broker.
+
+Ein Thema mit **leerer** Nutzlast geht immer flüchtig hinaus, auch wenn die
+Tabelle es zurückbehalten würde: eine leere Nutzlast **löscht** ein
+zurückbehaltenes Thema im Broker. Aus demselben Grund stehen `letzter_fehler`
+und `lpN_fahrzeug_name` gar nicht erst in der Tabelle — sie sind im Regelfall
+leer. Welches Thema zurückbehalten wird, steht jetzt in der Namenstabelle im
+Reiter *Einbindung in Loxone*.
+
+Wer in Loxone auf einen zurückbehaltenen Zustand baut, verknüpft ihn mit `OK`
+und `BETRIEBSBEREIT` — ein zurückbehaltener Wert sagt nicht, ob er fünf
+Sekunden oder fünf Tage alt ist.
+
+**Die Begründung von EVCC ging verloren.** Ein Befehl, den EVCC ablehnt,
+lieferte nur `HTTP 400 von http://127.0.0.1:7070/api/buffersoc/1`. Gemessen
+antwortet EVCC dabei mit `{"error":"battery not configured"}` — dem Satz, der
+alles erklärt. Er steht jetzt in der Antwort und im Protokoll.
+
+**Gerundet wird weiterhin, aber nicht mehr still.** Loxone sendet aus einem
+Analogbaustein Kommazahlen; `limitsoc=50.5` ging als `.../limitsoc/51` hinaus
+und in der Antwort stand nur `WERT=51`. Abgewiesen wird die Kommazahl
+weiterhin nicht — sonst wäre der Befehl aus Loxone unbenutzbar —, aber die
+Antwort trägt jetzt zusätzlich `GERUNDET=50.5`.
+
+### Nicht geändert
+
+Die Prüfmatrix des Endpunkts wurde am Gerät durchgemessen und hielt durch:
+fehlendes Token, falsches Token, unbekannte Aktion, eingeschleuster Befehl
+(`aktion=status;id`, `wert=pv;rm -rf /`, `feld=../../etc/passwd`), die Grenzen
+aller Zahlbefehle und ein Ladepunkt außerhalb 1..4 wurden sämtlich mit einer
+eigenen Begründung abgewiesen. Die drei Ausgänge der Selbstprüfung antworteten
+wie vorgeschrieben.
+
+### Was nicht gemessen ist
+
+An dieser Anlage führt EVCC **keinen Ladepunkt** und **keinen Hausspeicher**.
+Alle schreibenden Befehle wurden deshalb bis zur Grenze des Plugins gemessen —
+Token, Bereich, Pfadbildung, Weiterreichen an EVCC —, aber keiner hat je eine
+Ladung geschaltet. Ob `retain` an dieser Linie in Loxone ankommt, ist am
+Broker belegt, nicht am Miniserver: die virtuellen Eingänge dieser Linie sind
+noch nicht eingerichtet.
+
 ## Neu in 0.9.28
 
 Ein Wort in der erzeugten Loxone-Vorlage: „muessen" heißt jetzt „müssen".
