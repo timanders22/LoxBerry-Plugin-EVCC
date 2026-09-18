@@ -9,6 +9,35 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.32
+
+**Das Update verliert die Konfiguration nicht mehr, wenn die Sicherung
+scheitert.** Bis 0.9.31 meldete `preupgrade.sh` immer „Konfiguration
+gesichert“ – der Kopierbefehl wurde nicht geprüft, seine Fehlerausgabe ging
+ins Leere, und das Wurzelverzeichnis des LoxBerry wurde aus dem fünften
+Argument geglaubt. Danach löscht der Installer den Konfigurationsordner. Hatte
+das Sichern nicht geklappt, waren EVCC-Passwort und Endpunkt-Token weg.
+
+* **`preupgrade.sh`** sucht die LoxBerry-Wurzel und prüft sie (mit
+  `config/system/general.json`). Die Sicherung entsteht neben ihrem Platz,
+  wird per `diff -r` gegen das Original geprüft und erst dann an ihren Platz
+  gebracht; die alte Sicherung fällt zuletzt. Scheitert etwas, bricht das
+  Update mit Rückgabewert 2 ab, **bevor** etwas gelöscht wird, und die alte
+  Fassung bleibt samt Konfiguration stehen.
+* **`postupgrade.sh`** löscht die Sicherung nur, wenn das Zurückstellen
+  nachweislich gelungen ist. Sonst bleibt sie liegen, und das Protokoll sagt,
+  wo.
+* Eine Datei, die es in der Konfiguration nicht mehr gibt, kommt aus einer
+  alten Sicherung nicht mehr zurück (bis 0.9.31 wurde in die vorhandene
+  Sicherung hineinkopiert).
+* **`uninstall`** räumt auch die Zwischenstände `.neu` und `.alt` weg – sie
+  tragen dieselben Zugangsdaten.
+
+Gemessen in WSL/Ubuntu mit nachgestelltem `purge_installation`
+(`Pruefung-EVCC-0.9.32/messe_upgrade.sh`, sieben Fälle): 0.9.32 ohne Befund,
+0.9.31 als Eichung mit fünf. Am LoxBerry selbst ist das Update **nicht**
+gemessen.
+
 ## Neu in 0.9.30
 
 **Behebt eine schwere Regression aus 0.9.29: die Oberfläche brauchte 19

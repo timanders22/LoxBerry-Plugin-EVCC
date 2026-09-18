@@ -96,6 +96,10 @@ echo "<INFO> Konfiguration und Datenbank liegen in /etc/evcc.yaml und /var/lib/e
 UN_FOLDER="${3:-$PDIR}"
 UN_BASE="${5:-$LBHOME}"
 if [ -n "$UN_FOLDER" ] && [ -n "$UN_BASE" ] && [ -d "$UN_BASE/data/plugins" ]; then
-    rm -rf "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung" 2>/dev/null
+    # .neu und .alt: seit 0.9.32 baut preupgrade.sh die Sicherung daneben;
+    # ein abgebrochenes Update kann sie mit denselben Zugangsdaten hinterlassen.
+    rm -rf "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung" \
+           "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung.neu" \
+           "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung.alt" 2>/dev/null
 fi
 exit 0
