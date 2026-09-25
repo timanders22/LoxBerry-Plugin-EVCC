@@ -68,11 +68,18 @@ header('Content-Type: text/plain; charset=utf-8');
  * Belegt wird der Zustand deshalb nicht durch die Liste, sondern dadurch,
  * dass der Reiter Test diesen Endpunkt wirklich ueber HTTP aufruft.
  */
-$ev_kandidaten = array(
-    dirname(dirname(dirname(__DIR__))) . '/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php',
-    dirname(dirname(__DIR__)) . '/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php',
-    dirname(__DIR__) . '/htmlauth/ev_lib.php',
-);
+/* Seit 0.9.33 entscheidet der eigene Ablageort, welche Lage gilt: liegt diese
+ * Datei unter .../plugins/<ordner>, ist sie installiert, sonst liegt sie in
+ * einem ausgepackten Archiv. Bis 0.9.32 wurden drei Kandidaten der Reihe nach
+ * probiert; aus einem Archiv unter / war der erste
+ * /htmlauth/plugins/html/ev_lib.php ab der Laufwerkswurzel, und was dort lag,
+ * lief als Bibliothek (in WSL gemessen, Pruefung-EVCC-0.9.33, Fall T2;
+ * Bauart ZendureSolarFlow 0.9.26). */
+if (basename(dirname(__DIR__)) === 'plugins') {
+    $ev_kandidaten = array(dirname(dirname(dirname(__DIR__))) . '/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php');
+} else {
+    $ev_kandidaten = array(dirname(__DIR__) . '/htmlauth/ev_lib.php');
+}
 $ev_lib = '';
 foreach ($ev_kandidaten as $ev_k) {
     if (is_file($ev_k)) { $ev_lib = $ev_k; break; }

@@ -205,6 +205,12 @@ if ($ev_post && isset($_POST['save_mqtt'])) {
     } else {
         $ev_mcfg['mqtt_topic'] = trim($ev_mtopic, '/');
     }
+    $ev_mvoll = trim((string) (isset($_POST['mqtt_vollsend_min']) ? $_POST['mqtt_vollsend_min'] : ''));
+    if (!ev_wert_pruefen('mqtt_vollsend_min', $ev_mvoll)) {
+        $ev_fehler[] = ev_t('EINST.FEHLER_VOLLSEND');
+    } else {
+        $ev_mcfg['mqtt_vollsend_min'] = (int) $ev_mvoll;
+    }
     if (!$ev_fehler) {
         if (ev_config_write($ev_mcfg)) {
             $ev_meldungen[] = ev_t('EINST.GESPEICHERT');
@@ -614,6 +620,11 @@ if ($ev_link !== $ev_cfg['url']) { ?>
   <input data-role="none" type="text" id="mqtt_topic" name="mqtt_topic" value="<?= ev_e($ev_cfg['mqtt_topic']) ?>" placeholder="evcc2lox">
   <div class="sm-hilfe"><?= ev_t('EINST.H_MQTT_TOPIC') ?></div>
 </div>
+<div class="sm-feld">
+  <label for="mqtt_vollsend_min"><?= ev_e(ev_t('EINST.L_MQTT_VOLLSEND')) ?></label>
+  <input data-role="none" type="number" id="mqtt_vollsend_min" name="mqtt_vollsend_min" value="<?= (int) $ev_cfg['mqtt_vollsend_min'] ?>" min="0" max="1440">
+  <div class="sm-hilfe"><?= ev_t('EINST.H_MQTT_VOLLSEND') ?></div>
+</div>
 <div class="sm-legende"><span><i class="sm-punkt sm-b-aktion"></i> <?= ev_t('LEGENDE.AKTION') ?></span></div>
 <div class="sm-knopfreihe">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('ALLG.SPEICHERN')) ?></button>
@@ -641,6 +652,7 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 <table class="sm-tbl">
 <tr><th><?= ev_e(ev_t('MQTT.T_THEMA')) ?></th><th><?= ev_e(ev_t('MQTT.T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('MQTT.T_RETAIN')) ?></th><th><?= ev_e(ev_t('MQTT.T_EVCC')) ?></th></tr>
 <?php foreach (ev_felder() as $ev_name => $ev_d) {
+    if (in_array($ev_name, ev_mqtt_nicht_senden(), true)) { continue; }
     $ev_txt = ev_t($ev_d['text']);
     if (isset($ev_d['nr'])) { $ev_txt = sprintf($ev_txt, (int) $ev_d['nr']); } ?>
 <tr>
@@ -650,6 +662,12 @@ if ($ev_link !== $ev_cfg['url']) { ?>
   <td><span class="sm-mono"><?= ev_e($ev_d['mqtt'] !== '' ? $ev_d['mqtt'] : '-') ?></span></td>
 </tr>
 <?php } ?>
+<tr>
+  <td><span class="sm-mono"><?= ev_e($ev_cfg['mqtt_topic']) ?>/ts</span></td>
+  <td><?= ev_t('MQTT.TS_TEXT') ?> <span class="sm-mono">s</span></td>
+  <td><?= ev_e(ev_t('MQTT.RETAIN_NEIN')) ?></td>
+  <td><span class="sm-mono">-</span></td>
+</tr>
 </table>
 </div>
 

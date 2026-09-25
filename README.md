@@ -9,6 +9,106 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.33
+
+**Die Deinstallation hat die Zugangsdaten liegen lassen.** `uninstall` nahm
+den Pluginordner aus dem ersten Argument – dort übergibt der Installer eine
+Zufallskennung. Entfernt wurde damit nichts: die Zweitschrift
+`config/plugins/evcc.backup.evcc.json` mit dem EVCC-Passwort im Klartext und
+dem Token des Endpunkts blieb liegen, und das Protokoll sagte, beides sei
+gelöscht. Jetzt kommt der Ordner aus dem dritten Argument, und gemeldet wird,
+was wirklich weg ist.
+
+**MQTT: was zurückbehalten wird.** Hausregel: ein Wert, der von selbst
+veraltet, und eine Aussage des Plugins über sich selbst gehen nicht retained
+hinaus; Zustände und Einstellungen der Anlage schon.
+
+* `lpN_pv_warten_min` und `lpN_phasen_warten_min` sind Restzeiten („noch
+  4 min“) und gehen nicht mehr retained hinaus.
+* Zurückbehalten wird nur noch, was EVCC im selben Lauf geliefert hat.
+  Antwortet EVCC nicht, gehen auch Zustände und Einstellungen flüchtig
+  hinaus: Loxone sieht sie wie bisher, im Broker bleibt der zuletzt von EVCC
+  gemeldete Stand. Bisher schrieb ein gescheiterter Abruf ohne
+  Zwischenspeicher – etwa nach einem Neustart des LoxBerry, solange EVCC noch
+  nicht antwortet – Nullen retained über den letzten echten Stand, beim
+  Lademodus also „aus“.
+* `FEHLER_NR` behält Namen und Bedeutung. 0, 4 und 5 meldet EVCC selbst und
+  gehen retained hinaus; 1, 2, 3 und 9 sind Fehlschläge des eigenen Abrufs
+  und gehen flüchtig hinaus.
+* Alte zurückbehaltene Werte dieser Themen räumt das Plugin einmal ab. Es
+  fragt dazu beim Broker nach (Zugangsdaten aus der LoxBerry-Konfiguration)
+  und hält die Sache erst für erledigt, wenn der Broker bestätigt, dass nichts
+  mehr dasteht. Ist der Broker nicht zu fragen, wird in jedem Lauf unmittelbar
+  vor dem gültigen Wert abgeräumt; das kostet je Altthema ein Datagramm mehr.
+  Grenze: der UDP-Eingang des MQTT-Gateways verwirft unter Last Datagramme –
+  was dabei verloren geht, räumt der nächste Lauf ab.
+* **Die Deinstallation leert jetzt alle zurückbehaltenen Themen der Linie**
+  (bis zu 84 unter `evcc2lox/`), mit Nachfrage beim Broker vor und nach jeder
+  von höchstens drei Runden. Hängt das Leeren, bricht die Deinstallation es
+  nach 60 s ab (nach weiteren 5 s hart) und sagt es als Warnung.
+
+**Ein ausgepacktes Archiv wirkt nicht mehr auf die Anlage.**
+
+* Als LoxBerry-Wurzel gilt nur noch ein Verzeichnis mit `config/plugins`,
+  `data/plugins` und `config/system/general.json`; der fest eingetragene
+  Rückfall auf das Heimatverzeichnis des Benutzers `loxberry` ist weg.
+* Die Pfade der Anlage gelten nur, wenn die Bibliothek dort installiert liegt
+  oder `LBHOMEDIR` **und** `LBPPLUGINDIR` gesetzt sind. Bisher legte
+  `bin/ev_abruf.php` aus einem Archiv heraus in der Anlage eine Konfiguration
+  mit neuem Token an und sandte 109 Themen an deren MQTT-Gateway – schon mit
+  `LBHOMEDIR` allein, das auf dem LoxBerry systemweit gesetzt ist. Jetzt
+  verweigert es sich und sagt, warum. Die Knöpfe „Dienst starten/anhalten/neu
+  starten“ und „EVCC aktualisieren“ schalten aus einem Archiv heraus nichts.
+* Endpunkt, Abrufprogramm und Sprachtexte suchen nichts mehr ab der
+  Laufwerkswurzel: welche Bibliothek gilt, entscheidet der eigene Ablageort.
+* `postinstall.sh` und `uninstall` prüfen die Wurzel wie `preupgrade.sh`;
+  ohne brauchbare Wurzel warnen sie und tun nichts.
+
+**Nach einem Update** sagt `postinstall.sh` nicht mehr, die Oberfläche lege
+beim ersten Aufruf ein Zugriffstoken an – es ist da, und die Adressen im
+Miniserver gelten weiter.
+
+**MQTT sendet nur noch Änderungen.** Bis 0.9.32 gingen in jedem Lauf – bei
+der Vorgabe alle 15 s – alle Themen hinaus, mit zwei Ladepunkten rund 109
+Datagramme. Am Gerät kamen so 82 % des Verkehrs am UDP-Eingang des
+MQTT-Gateways von diesem Plugin, und dieser Eingang verwirft unter Last
+Datagramme – auch die anderer Plugins.
+
+* In jedem Lauf gehen nur das Lebenszeichen (`ok`, `ts`, `dienst`,
+  `betriebsbereit`) und die Werte, die sich geändert haben (Wert oder
+  Retain-Merkmal), hinaus.
+* Alles geht hinaus nach einem Neustart des LoxBerry, nach einem Update des
+  Plugins, nach einem Wechsel des Präfixes, auf Knopfdruck im Reiter *Test*
+  und im groben Takt: **Reiter MQTT, „Alle Werte erneut senden … alle …
+  Minuten“, Vorgabe 15**, 0 = nur zu den genannten Anlässen. Startet der
+  Miniserver neu, ohne dass der LoxBerry neu startet, fehlen ihm die nicht
+  zurückbehaltenen Werte bis zur nächsten Änderung oder bis zu diesem
+  Vollversand.
+* Grenze: der UDP-Eingang bestätigt nichts. Geht eine Änderung dort
+  verloren, fehlt sie in Loxone bis zur nächsten Änderung oder zum nächsten
+  Vollversand.
+
+Gemessen in WSL (Fälle N1–N13): unveränderte Werte 100 → 4 Datagramme je
+Lauf, eine geänderte Größe 100 → 5 (Prüfkonfiguration mit zwei Ladepunkten,
+Tarife aus; mit Tarifen sind es vorher 109).
+
+**`alter_s` geht nicht mehr über MQTT hinaus**, dafür **`ts`**: der
+Zeitpunkt des letzten gelungenen Abrufs in Unix-Sekunden (0 = noch nie), nie
+zurückbehalten. Über MQTT gibt es kein Alter, nur einen Zeitstempel; Loxone
+rechnet `(Loxone-Zeit + 1230768000) − ts`. Wer einen virtuellen Eingang an
+`evcc2lox/alter_s` hat, stellt ihn auf `ts` um – der alte Eingang behält
+sonst seinen letzten Wert. `alter_s` war nie zurückbehalten; im Broker steht
+kein Altwert. Über HTTP bleibt `ALTER_S` unverändert.
+
+Nicht geändert: Befehle an EVCC gehen weiterhin sofort und ohne Warteschlange
+hinaus; ist EVCC nicht erreichbar, antwortet der Endpunkt mit `OK=0`, und
+nichts wird für später abgelegt.
+
+Gemessen in WSL/Ubuntu (`Pruefung-EVCC-0.9.33/messe_nachlese.sh`, 69 Fälle,
+Broker- und Gateway-Attrappe): 0.9.32 45 rot, 0.9.33 0 rot; jede Behebung
+einzeln zurückgebaut (Eichung, siehe dort). Am LoxBerry ist nichts davon
+gemessen.
+
 ## Neu in 0.9.32
 
 **Das Update verliert die Konfiguration nicht mehr, wenn die Sicherung
@@ -695,6 +795,10 @@ Deinstallationsprotokoll.
 Was **sehr wohl** mitgeht, sind Konfiguration und Daten des Plugins. In
 `evcc.json` steht das EVCC-Passwort im Klartext und das Token des
 unangemeldeten Endpunkts; beides bleibt nach dem Entfernen nicht liegen.
+
+Bis 0.9.32 stimmte das nicht: die Zweitschrift neben dem Konfigurationsordner
+blieb liegen (siehe „Neu in 0.9.33“). Seit 0.9.33 räumt die Deinstallation
+außerdem die zurückbehaltenen MQTT-Themen der Linie im Broker ab.
 
 ## Bekannte Unschärfe
 

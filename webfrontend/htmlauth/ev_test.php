@@ -618,6 +618,12 @@ function ev_test_aktion($was)
         case 'start':
         case 'stop':
         case 'restart':
+            /* Aus einem ausgepackten Archiv heraus nichts an der Anlage
+             * schalten (seit 0.9.33): ohne installierte Lage kennt das Plugin
+             * keine Anlage, und der Knopf traefe den EVCC-Dienst des Rechners,
+             * auf dem das Archiv liegt (in WSL gemessen, Pruefung-EVCC-0.9.33,
+             * Fall W16). */
+            if (ev_paths()['home'] === '') { return array(0, ev_t('TEST.M_ARCHIV')); }
             /* Je Vorgang ein eigener Satz.
              *
              * Bis 0.9.11 stand hier sprintf('Dienst %s ausgefuehrt.', $was) -
@@ -657,6 +663,7 @@ function ev_test_aktion($was)
                                               : sprintf(ev_t('TEST.M_ABRUF_FEHL'), ev_e($st['fehler'])));
 
         case 'update':
+            if (ev_paths()['home'] === '') { return array(0, ev_t('TEST.M_ARCHIV')); }
             // Nur, wenn der Anwender es ausdruecklich freigegeben hat. Der
             // Knopf wird sonst gar nicht erst angezeigt - aber ein Handler,
             // der sich auf die Sichtbarkeit eines Knopfes verlaesst, ist
@@ -688,7 +695,8 @@ function ev_test_aktion($was)
                                             ev_e($text), ev_e($url)));
 
         case 'mqtt':
-            $n = ev_mqtt_publish();
+            // Der Knopf sendet ALLES, nicht nur Aenderungen (seit 0.9.33).
+            $n = ev_mqtt_publish(null, true);
             return array($n > 0 ? 1 : 0, $n > 0 ? sprintf(ev_t('TEST.M_MQTT_OK'), $n)
                                                 : ev_t('TEST.M_MQTT_FEHL'));
 

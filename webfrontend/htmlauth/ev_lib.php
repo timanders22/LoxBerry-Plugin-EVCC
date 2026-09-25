@@ -45,11 +45,12 @@ define('EV_FAHRZEUGE', 4);
 /* Den LoxBerry-Wurzelordner ohne festen Systempfad bestimmen.
  *
  * Vom eigenen Ablageort aufwaerts, bis ein Verzeichnis gefunden ist, das
- * config/plugins UND webfrontend enthaelt. Das trifft die uebliche
- * Installation genauso wie eine an einem anderen Ort - und es trifft auch
- * den Fall, dass das Plugin noch als entpacktes Archiv daliegt (dann findet
- * es nichts und gibt einen Leerstring zurueck, was der Aufrufer ohnehin
- * abfangen muss).
+ * config/plugins, data/plugins UND config/system/general.json traegt
+ * (Regeln/06). Bis 0.9.32 genuegten config/plugins und webfrontend - genau
+ * diese Ordner hinterlaesst ein Pruefstand auf einem Arbeitsrechner, und ein
+ * Archiv in einem solchen Baum nahm ihn als LoxBerry (in WSL gemessen,
+ * Pruefung-EVCC-0.9.33, Fall W9). Findet sich nichts, kommt ein Leerstring
+ * zurueck; der Aufrufer muss ihn abfangen.
  *
  * Der Name traegt kein Plugin-Kuerzel und ist deshalb abgesichert: zwei
  * Bibliotheken landen nie im selben Prozess, aber die Pruefung kostet nichts.
@@ -59,7 +60,8 @@ if (!function_exists('lb_wurzel_ermitteln')) {
     {
         $d = __DIR__;
         for ($i = 0; $i < 8; $i++) {
-            if (is_dir($d . '/config/plugins') && is_dir($d . '/webfrontend')) {
+            if (is_dir($d . '/config/plugins') && is_dir($d . '/data/plugins')
+                && is_file($d . '/config/system/general.json')) {
                 return $d;
             }
             $eltern = dirname($d);
@@ -70,14 +72,29 @@ if (!function_exists('lb_wurzel_ermitteln')) {
     }
 }
 
+/* Die Wurzel in der Reihenfolge der Hausregel: erst die Umgebung, dann die
+ * Suche - und DANACH NICHTS MEHR.
+ *
+ * Bis 0.9.32 stand hier als dritte Stufe ein fest verdrahteter Systempfad
+ * (das Heimatverzeichnis des Benutzers loxberry). Er macht jede Suche
+ * wirkungslos und trifft auf einem anders installierten LoxBerry die falsche
+ * Anlage; dieselbe Stelle wurde in Spotpreis-Tibber 0.9.18,
+ * ZendureSolarFlow 0.9.25 und VolkswagenID 0.9.24 entfernt.
+ *
+ * Ein gesetztes LBHOMEDIR gilt mit config/plugins UND data/plugins darunter.
+ * Rueckgabe '' heisst "keine Wurzel"; jeder Aufrufer muss das abfangen. */
+function ev_lbhome()
+{
+    $h = rtrim((string) getenv('LBHOMEDIR'), '/');
+    if ($h !== '' && is_dir($h . '/config/plugins') && is_dir($h . '/data/plugins')) {
+        return $h;
+    }
+    return lb_wurzel_ermitteln();
+}
+
 function ev_paths()
 {
-    $home = getenv('LBHOMEDIR');
-    if (!$home || !is_dir($home)) {
-        foreach (array(lb_wurzel_ermitteln(), '/home/loxberry/loxberry') as $k) {
-            if (is_dir($k)) { $home = $k; break; }
-        }
-    }
+    $home = ev_lbhome();
     $plugin = getenv('LBPPLUGINDIR');
     if (!$plugin) {
         /* Ohne Umgebungsvariable aus dem Ablageort ableiten - ueber eine
@@ -113,10 +130,38 @@ function ev_paths()
         }
         if ($plugin === '') { $plugin = 'evcc'; }
     }
+    /* Archivmodus (seit 0.9.33). Die Pfade DER ANLAGE gelten nur, wenn diese
+     * Bibliothek dort installiert liegt
+     * (<Wurzel>/webfrontend/htmlauth/plugins/<ordner>, physisch verglichen)
+     * oder der Aufrufer Wurzel UND Ordner ausdruecklich nennt ($LBHOMEDIR und
+     * $LBPPLUGINDIR - so ruft uninstall/uninstall bin/ev_abruf.php
+     * --mqtt-leeren, und so arbeiten die Pruefwerkzeuge mit ihrer Attrappe).
+     * Sonst ist das ein ausgepacktes Archiv oder ein Pruefordner: alles bleibt
+     * in dessen eigenem Ordner, und bin/ev_abruf.php steigt aus.
+     *
+     * Bis 0.9.32 nahm ein Archiv unterhalb einer echten Wurzel diese Wurzel -
+     * mit $LBHOMEDIR allein, wie es am Geraet in /etc/environment steht,
+     * ebenso - und dazu den Namen des Archivordners als Pluginordner:
+     * ev_abruf.php legte dort Konfiguration mit frischem Token und Protokoll
+     * an und sandte 109 Themen an das MQTT-Gateway der Anlage (in WSL
+     * gemessen, Pruefung-EVCC-0.9.33, Faelle W7, W8, W11, W12). Bauart
+     * tb_paths() aus Spotpreis-Tibber 0.9.19. */
+    $ev_gefunden = $home;
+    if ($home !== '') {
+        $ev_soll = @realpath($home . '/webfrontend/htmlauth/plugins/' . basename(__DIR__));
+        $ev_ist = @realpath(__DIR__);
+        $ev_installiert = ($ev_soll !== false && $ev_ist !== false && $ev_soll === $ev_ist);
+        $ev_lbp = basename(rtrim((string) getenv('LBPPLUGINDIR'), '/'));
+        $ev_ausdruecklich = $ev_lbp !== ''
+            && !in_array($ev_lbp, array('.', '/', 'html', 'htmlauth', 'bin', 'plugins'), true)
+            && $home === rtrim((string) getenv('LBHOMEDIR'), '/');
+        if (!$ev_installiert && !$ev_ausdruecklich) { $home = ''; }
+    }
     if ($home) {
         return array(
             'home'      => $home,
             'plugin'    => $plugin,
+            'archiv'    => '',
             'config'    => $home . '/config/plugins/' . $plugin . '/evcc.json',
             /* Die Zweitschrift liegt NEBEN dem Plugin-Ordner, nicht darin.
              * LoxBerry entfernt config/plugins/<ordner>/ bei Deinstallation
@@ -134,16 +179,20 @@ function ev_paths()
             'tmp'       => '/tmp/' . $plugin,
         );
     }
+    /* Keine Anlage (Entwicklung, ausgepacktes Archiv, fremder Baum): neben
+     * dem Plugin arbeiten. Bis 0.9.32 lagen Daten, Protokoll und
+     * Zwischenspeicher hier unter sys_get_temp_dir()/evcc - auf einem LoxBerry
+     * ist das /tmp/evcc, der Zwischenspeicher DER ANLAGE (Fall T4). */
     $eigen = dirname(dirname(__DIR__));
     return array(
-        'home' => '', 'plugin' => 'evcc',
+        'home' => '', 'plugin' => 'evcc', 'archiv' => $ev_gefunden,
         'config' => $eigen . '/config/evcc.json',
         'sicherung' => $eigen . '/config/evcc.backup.json',
         'sicherung_alt' => $eigen . '/config/evcc.backup.json',
         'configdir' => $eigen . '/config',
-        'datadir' => sys_get_temp_dir() . '/evcc',
-        'log' => sys_get_temp_dir() . '/evcc/evcc.log',
-        'tmp' => sys_get_temp_dir() . '/evcc',
+        'datadir' => $eigen . '/data',
+        'log' => $eigen . '/log/evcc.log',
+        'tmp' => $eigen . '/tmp',
     );
 }
 
@@ -218,6 +267,11 @@ function ev_vorgaben()
         // MQTT
         'mqtt_ein'       => 1,
         'mqtt_topic'     => 'evcc2lox',
+        // Alle Werte erneut senden, auch unveraendert, alle N Minuten; sonst
+        // geht nur hinaus, was sich geaendert hat, und das Lebenszeichen.
+        // 0 = kein Vollversand im Takt (nur bei Start, Pluginstart und
+        // Praefixwechsel). Seit 0.9.33, Name wie im Abfahrts-Assistenten.
+        'mqtt_vollsend_min' => 15,
         // Umfang
         'ladepunkte'     => 2,         // wie viele Ladepunkte ausgeben
         'fahrzeuge'      => 2,         // wie viele Fahrzeuge ausgeben
@@ -325,6 +379,7 @@ function ev_config($erzeugen = true)
     $cfg['update_ein'] = empty($cfg['update_ein']) ? 0 : 1;
     $cfg['mqtt_topic'] = preg_replace('#[^A-Za-z0-9_/\-]#', '', (string) $cfg['mqtt_topic']);
     if ($cfg['mqtt_topic'] === '') { $cfg['mqtt_topic'] = 'evcc2lox'; }
+    $cfg['mqtt_vollsend_min'] = max(0, min(1440, (int) $cfg['mqtt_vollsend_min']));
 
     // Token beim ersten Mal selbst erzeugen und gleich sichern.
     //
@@ -1539,6 +1594,12 @@ function ev_werte($st = null)
     // Die eigenen Felder.
     $out['ok'] = array('wert' => (int) (!empty($st['ok'])), 'pfad' => '-');
     $out['alter_s'] = array('wert' => !empty($st['stand']) ? max(0, time() - (int) $st['stand']) : 99999, 'pfad' => '-');
+    /* Ueber MQTT gibt es kein Alter, nur einen Zeitstempel (Regeln/07,
+     * Abschnitt 3): ts ist der Zeitpunkt des letzten GELUNGENEN Abrufs in
+     * Unix-Sekunden, 0 = noch nie. Er bleibt bei einem Fehlschlag stehen, das
+     * Alter rechnet Loxone selbst: (Loxone-Zeit + 1230768000) - ts. Seit
+     * 0.9.33; alter_s bleibt in der HTTP-Zeile. */
+    $out['ts'] = array('wert' => !empty($st['stand']) ? (int) $st['stand'] : 0, 'pfad' => '-');
     $out['dienst'] = array('wert' => ev_dienst_laeuft() ? 1 : 0, 'pfad' => '-');
     $ev_nr = isset($st['fehlernr']) ? (int) $st['fehlernr'] : (empty($st['ok']) ? 9 : 0);
     $ev_ein = ev_einrichtung($st);
@@ -1936,7 +1997,7 @@ function ev_abo_text()
  * Ladepunkt- und Fahrzeugnamen werden ohne ihre Nummer nachgeschlagen.
  *
  * NICHT in dieser Tabelle stehen mit Absicht:
- *   ok, alter_s, dienst, betriebsbereit  - das ist das Lebenszeichen. Wer es
+ *   ok, ts, dienst, betriebsbereit  - das ist das Lebenszeichen. Wer es
  *       zurueckbehaelt, laesst nach einem gestorbenen Cron fuer immer
  *       "laeuft" im Broker stehen.
  *   letzter_fehler, lpN_fahrzeug_name    - im Regelfall LEER. Eine leere
@@ -1944,6 +2005,21 @@ function ev_abo_text()
  *       ueblicherweise leer ist, gehoert deshalb nicht retained gesendet.
  *   alle Leistungen, Energien, Preise, Prognosen, Sitzungswerte, der
  *       gemessene Ladestand und die Restzeiten - Messwerte mit Zeitbezug.
+ *   lpN_pv_warten_min, lpN_phasen_warten_min - ebenfalls Restzeiten ("noch
+ *       4 min"): sie laufen von selbst ab und sind damit Messwerte mit
+ *       Zeitbezug (Regeln/07, Abschnitt 3, Entscheidung vom 18.09.2026 zum
+ *       Alter). Bis 0.9.32 standen sie hier; den Altwert raeumt
+ *       ev_mqtt_altlast() ab.
+ *
+ * Die Tabelle sagt, was retained gehen DARF. Ob es in einem Lauf wirklich
+ * retained geht, entscheidet ev_mqtt_publish() zusaetzlich daran, ob EVCC in
+ * diesem Lauf geantwortet hat (seit 0.9.33): ohne Antwort sind die Werte
+ * Platzhalter oder der alte Stand und gehen fluechtig hinaus, und im Broker
+ * bleibt der zuletzt von EVCC gemeldete Stand (Bauart Robonect 1.1.12). Das
+ * gilt auch fuer fehler_nr: 0, 4 und 5 meldet EVCC (retained); 1, 2, 3 und 9
+ * setzt das Plugin aus seinem eigenen, gescheiterten Abruf (fluechtig) -
+ * Regeln/07, Abschnitt 3, Entscheidung vom 19.09.2026: eine Aussage des
+ * Dienstes ueber sich selbst ist nie retained.
  */
 function ev_retain_liste()
 {
@@ -1961,8 +2037,8 @@ function ev_retain_liste()
             'plan_aktiv' => 1, 'smartcost_aktiv' => 1, 'modus_nr' => 1,
             'limit_soc' => 1, 'prioritaet' => 1, 'min_soc' => 1,
             'minstrom_a' => 1, 'maxstrom_a' => 1, 'smartcost_grenze' => 1,
-            'batterieboost' => 1, 'phasen_soll' => 1, 'pv_warten_min' => 1,
-            'phasen_warten_min' => 1, 'plan_soc' => 1, 'plan_kwh' => 1,
+            'batterieboost' => 1, 'phasen_soll' => 1,
+            'plan_soc' => 1, 'plan_kwh' => 1,
         ),
         /* Je Fahrzeug: der eingestellte Ladestand, nicht der gemessene. */
         'fahrzeug' => array(
@@ -1992,16 +2068,495 @@ function ev_retain_fuer($name, $nutzlast = null)
     return 0;
 }
 
-function ev_mqtt_publish($werte = null)
+/**
+ * Die Themen, deren zurueckbehaltener ALTWERT abgeraeumt werden muss, und je
+ * Thema die Werte, die dabei NICHT als Altwert zaehlen.
+ *
+ * Eine Umstellung von retain auf publish loescht nichts: der alte Wert steht
+ * im Broker weiter und wird nach jedem Neustart von Broker oder Gateway
+ * wieder ausgeliefert. Seit 0.9.33:
+ *   lpN_pv_warten_min, lpN_phasen_warten_min - bis 0.9.32 retained; jeder
+ *       zurueckbehaltene Wert ist ein Altwert.
+ *   fehler_nr - 0, 4 und 5 meldet EVCC selbst, sie duerfen stehen bleiben;
+ *       1, 2, 3 und 9 setzte eine Vorfassung aus ihrem eigenen, gescheiterten
+ *       Abruf retained und sind Altwerte.
+ * Mit $werte nur die Themen, die in diesem Lauf einen Wert haben - abgeraeumt
+ * wird unmittelbar vor dem gueltigen Wert, nie ohne ihn.
+ */
+function ev_mqtt_altlast_liste($werte = null)
+{
+    $l = array();
+    for ($i = 1; $i <= EV_LADEPUNKTE; $i++) {
+        $l['lp' . $i . '_pv_warten_min'] = array();
+        $l['lp' . $i . '_phasen_warten_min'] = array();
+    }
+    $l['fehler_nr'] = array('0', '4', '5');
+    if ($werte !== null) {
+        foreach (array_keys($l) as $n) {
+            if (!isset($werte[$n])) { unset($l[$n]); }
+        }
+    }
+    return $l;
+}
+
+/**
+ * Den Broker fragen, welche der Themen $themen er zurueckbehaelt - in EINER
+ * Verbindung, ein SUBSCRIBE mit allen Filtern.
+ *
+ * Rueckgabe array('lage' => 'ok'|'unbekannt', 'belegt' => array(thema => wert)).
+ * 'ok' heisst: der Broker hat die Anmeldung (CONNACK 0) und JEDEN Filter
+ * (SUBACK-Rueckgabe unter 0x80) bestaetigt; was dann nicht unter 'belegt'
+ * steht, ist leer. 'unbekannt': er war nicht zu fragen (keine Wurzel, keine
+ * general.json, keine Verbindung, Anmeldung abgewiesen, Filter abgelehnt,
+ * keine Antwort) - das heisst nie "nichts belegt" (Muster 11 der Nachlese).
+ *
+ * Warum ueberhaupt fragen: das Abraeumen laeuft ueber den UDP-Eingang des
+ * Gateways, und dort meldet fwrite() auch fuer ein verworfenes Datagramm
+ * Erfolg (Regeln/07, "Ein Absender merkt nichts davon", Nachtrag vom
+ * 19.09.2026). Belegt ist das Abraeumen erst, wenn der Broker selbst sagt,
+ * dass nichts mehr dasteht.
+ *
+ * MQTT 3.1.1 von Hand, nur CONNECT, SUBSCRIBE (QoS 0) und DISCONNECT - ohne
+ * fremde Bibliothek; Bauart bw_mqtt_behalten_liste() (Beschattungswaechter
+ * 0.9.21), dort aus tb_mqtt_behalten_liste() (Spotpreis-Tibber 0.9.19).
+ * Anders als dort kommt der WERT mit zurueck: fehler_nr ist nur mit
+ * bestimmten Werten ein Altwert (ev_mqtt_altlast_liste()). Belegt ist ein
+ * Thema nur am EMPFANGENEN Paket mit Retain-Merkmal und nicht leerer Nutzlast.
+ * Die Anmeldung nimmt Brokeruser/Brokerpass aus der general.json (Regeln/07,
+ * Abschnitt 2); das Kennwort steht nur im CONNECT-Paket, nie in einem
+ * Protokoll und nie auf einer Kommandozeile.
+ */
+function ev_mqtt_behalten_liste(array $themen)
+{
+    $aus = array('lage' => 'unbekannt', 'belegt' => array());
+    $soll = array();
+    foreach ($themen as $t) {
+        if ((string) $t !== '') { $soll[(string) $t] = true; }
+    }
+    if (!$soll) {
+        $aus['lage'] = 'ok';
+        return $aus;
+    }
+    $p = ev_paths();
+    if ($p['home'] === '') { return $aus; }
+    $d = @json_decode((string) @file_get_contents($p['home'] . '/config/system/general.json'), true);
+    if (!is_array($d) || !isset($d['Mqtt']) || !is_array($d['Mqtt'])) { return $aus; }
+    $m = $d['Mqtt'];
+    $hol = function ($k) use ($m) {
+        return (isset($m[$k]) && is_scalar($m[$k])) ? (string) $m[$k] : '';
+    };
+    $host = trim($hol('Brokerhost'));
+    if ($host === '' || $host === 'localhost') { $host = '127.0.0.1'; }
+    $port = (int) $hol('Brokerport');
+    if ($port <= 0 || $port > 65535) { $port = 1883; }
+    $benutzer = $hol('Brokeruser');
+    $kennwort = $hol('Brokerpass');
+
+    $errno = 0;
+    $errstr = '';
+    $s = @stream_socket_client('tcp://' . $host . ':' . $port, $errno, $errstr, 2);
+    if (!$s) { return $aus; }
+    stream_set_timeout($s, 1);
+
+    $zk = function ($t) { return pack('n', strlen($t)) . $t; };
+    $laenge = function ($n) {
+        $o = '';
+        do {
+            $b = $n % 128;
+            $n = intdiv($n, 128);
+            if ($n > 0) { $b |= 128; }
+            $o .= chr($b);
+        } while ($n > 0);
+        return $o;
+    };
+    /* Genau $n Bytes lesen oder null - bei Zeitablauf und Verbindungsende. */
+    $lies = function ($n) use ($s) {
+        $d = '';
+        while (strlen($d) < $n) {
+            $t = @fread($s, $n - strlen($d));
+            if ($t === false || $t === '') {
+                $meta = stream_get_meta_data($s);
+                if (!empty($meta['timed_out']) || !empty($meta['eof']) || feof($s)) { return null; }
+                continue;
+            }
+            $d .= $t;
+        }
+        return $d;
+    };
+    /* Ein Paket: array(kopfbyte, rumpf) oder null. */
+    $paket = function () use ($lies) {
+        $k = $lies(1);
+        if ($k === null) { return null; }
+        $n = 0;
+        $mult = 1;
+        for ($i = 0; $i < 4; $i++) {
+            $b = $lies(1);
+            if ($b === null) { return null; }
+            $n += (ord($b) & 127) * $mult;
+            $mult *= 128;
+            if (!(ord($b) & 128)) { break; }
+        }
+        $r = ($n > 0) ? $lies($n) : '';
+        return ($r === null) ? null : array(ord($k), $r);
+    };
+
+    $flags = 0x02;                                  // saubere Sitzung
+    $nutz = $zk('evrueck' . getmypid());
+    if ($benutzer !== '') {
+        $flags |= 0x80;
+        // Ein Kennwort ohne Benutzer laesst MQTT 3.1.1 nicht zu.
+        if ($kennwort !== '') { $flags |= 0x40; }
+    }
+    $kopf = $zk('MQTT') . chr(4) . chr($flags) . pack('n', 10);
+    if ($benutzer !== '') {
+        $nutz .= $zk($benutzer);
+        if ($kennwort !== '') { $nutz .= $zk($kennwort); }
+    }
+    if (@fwrite($s, chr(0x10) . $laenge(strlen($kopf . $nutz)) . $kopf . $nutz) !== false) {
+        $ack = $paket();
+        if ($ack !== null && ($ack[0] >> 4) === 2 && strlen($ack[1]) >= 2 && ord($ack[1][1]) === 0) {
+            $sub = pack('n', 1);
+            foreach (array_keys($soll) as $t) { $sub .= $zk($t) . chr(0); }
+            @fwrite($s, chr(0x82) . $laenge(strlen($sub)) . $sub);
+            $bestaetigt = false;
+            $abgelehnt = false;
+            $ende = microtime(true) + 3.0;
+            while (microtime(true) < $ende) {
+                $pk = $paket();
+                if ($pk === null) { break; }           // Zeitablauf: nichts mehr gekommen
+                $art = $pk[0] >> 4;
+                if ($art === 9) {
+                    /* Je Filter ein Rueckgabebyte hinter der Paketkennung;
+                       0x80 heisst abgelehnt. */
+                    $rc = (string) substr($pk[1], 2);
+                    if (strlen($rc) !== count($soll)) { $abgelehnt = true; }
+                    for ($i = 0; $i < strlen($rc); $i++) {
+                        if (ord($rc[$i]) >= 0x80) { $abgelehnt = true; }
+                    }
+                    if ($abgelehnt) { break; }
+                    $bestaetigt = true;
+                    // Zurueckbehaltenes kommt unmittelbar nach dem SUBACK.
+                    $ende = min($ende, microtime(true) + 1.0);
+                } elseif ($art === 3 && strlen($pk[1]) >= 2) {
+                    $tl = unpack('n', substr($pk[1], 0, 2));
+                    $t = substr($pk[1], 2, $tl[1]);
+                    $versatz = 2 + $tl[1] + ((($pk[0] >> 1) & 3) > 0 ? 2 : 0);
+                    $wert = (string) substr($pk[1], $versatz);
+                    // Am empfangenen Paket: nur mit gesetztem Retain-Merkmal.
+                    if (isset($soll[$t]) && ($pk[0] & 1) && $wert !== '') {
+                        $aus['belegt'][$t] = $wert;
+                        if (count($aus['belegt']) === count($soll)) { break; }
+                    }
+                }
+            }
+            if ($bestaetigt && !$abgelehnt) {
+                $aus['lage'] = 'ok';
+            } else {
+                $aus['belegt'] = array();
+            }
+        }
+        @fwrite($s, chr(0xE0) . chr(0));
+    }
+    fclose($s);
+    return $aus;
+}
+
+/**
+ * Welche Altwerte muessen in diesem Versand abgeraeumt werden?
+ *
+ * Rueckgabe array('lage' => 'erledigt'|'belegt'|'unbekannt',
+ *                 'themen' => array(<thema ohne praefix>, ...)).
+ *
+ * Solange der Merker nicht liegt, wird der Broker nach allen Themen aus
+ * ev_mqtt_altlast_liste() gefragt (ev_mqtt_behalten_liste()), hoechstens
+ * einmal je Minute und Prozess (der Cron-Lauf versendet bis zu zwoelfmal):
+ * keines mit einem Altwert belegt -> Merker schreiben, nichts abraeumen
+ * ('erledigt'); einige belegt -> genau diese ('belegt'), kein Merker; nicht
+ * zu fragen -> alle ('unbekannt'), KEIN Merker - dann raeumt jeder Versand
+ * ab. Der Merker entsteht NUR aus der Antwort des Brokers, nie aus dem
+ * Senden: ueber den UDP-Eingang ist "gesendet" nicht "geloescht" (Regeln/07,
+ * Z. 215, am Geraet belegt).
+ *
+ * Der Merker traegt die Kennung "leer-bestaetigt <praefix>: <Themenliste>":
+ * ein anderes Praefix oder eine andere Zahl von Ladepunkten gilt nicht, und
+ * keine Vorfassung hat eine Datei dieses Namens angelegt. purge_installation
+ * raeumt ihn bei jedem Update mit dem Datenordner ab; dann wird einmal
+ * nachgefragt.
+ */
+function ev_mqtt_altlast($praefix, $werte = null)
+{
+    static $gemerkt = array();
+    $praefix = (string) $praefix;
+    $liste = ev_mqtt_altlast_liste($werte);
+    if (!$liste) { return array('lage' => 'erledigt', 'themen' => array()); }
+    $p = ev_paths();
+    $merker = $p['datadir'] . '/retain_altlast_bestaetigt';
+    $kennung = 'leer-bestaetigt ' . $praefix . ': ' . implode(' ', array_keys($liste));
+    if (is_file($merker) && trim((string) @file_get_contents($merker)) === $kennung) {
+        return array('lage' => 'erledigt', 'themen' => array());
+    }
+    if (isset($gemerkt[$kennung]) && (time() - $gemerkt[$kennung][0]) < 60) {
+        return $gemerkt[$kennung][1];
+    }
+    $voll = array();
+    foreach (array_keys($liste) as $n) { $voll[$praefix . '/' . $n] = $n; }
+    $f = ev_mqtt_behalten_liste(array_keys($voll));
+    if ($f['lage'] === 'ok') {
+        $weg = array();
+        foreach ($f['belegt'] as $t => $w) {
+            if (!isset($voll[$t])) { continue; }
+            if (!in_array((string) $w, $liste[$voll[$t]], true)) { $weg[] = $voll[$t]; }
+        }
+        if (!$weg) {
+            if (!is_dir($p['datadir'])) { @mkdir($p['datadir'], 0775, true); }
+            if (@file_put_contents($merker, $kennung . "\n") !== false) {
+                ev_log('MQTT: unter ' . $praefix . '/ steht keiner der frueher zurueckbehaltenen '
+                    . 'Altwerte mehr im Broker (' . implode(', ', array_keys($liste))
+                    . '; vom Broker bestaetigt).');
+            }
+            return array('lage' => 'erledigt', 'themen' => array());
+        }
+        $erg = array('lage' => 'belegt', 'themen' => $weg);
+        ev_log_wenn_neu('altlast_belegt', 'MQTT: im Broker stehen noch zurueckbehaltene '
+            . 'Altwerte unter ' . $praefix . '/ (' . implode(', ', $weg) . ') - sie gehen mit '
+            . 'leerer Nutzlast unmittelbar vor dem gueltigen Wert hinaus; danach wird wieder '
+            . 'nachgefragt.');
+    } else {
+        $erg = array('lage' => 'unbekannt', 'themen' => array_keys($liste));
+        ev_log_wenn_neu('altlast_unbekannt', 'MQTT: der Broker liess sich nicht befragen '
+            . '(Brokerhost, Brokerport und Zugangsdaten in general.json) - die frueher '
+            . 'zurueckbehaltenen Werte unter ' . $praefix . '/ gehen deshalb in jedem Versand '
+            . 'mit leerer Nutzlast unmittelbar vor dem gueltigen Wert hinaus. Siehe README.');
+    }
+    $gemerkt[$kennung] = array(time(), $erg);
+    return $erg;
+}
+
+/**
+ * Die Themen, die die Deinstallation leert: jedes, das eine veroeffentlichte
+ * Fassung je retained gesendet haben kann - die Tabelle ev_retain_liste() fuer
+ * ALLE moeglichen Ladepunkte und Fahrzeuge (die Einstellung kann frueher
+ * hoeher gestanden haben) und die Altwerte. Was nie retained ging, bleibt
+ * unberuehrt: eine leere Nachricht darauf loeschte nichts, kaeme aber am
+ * Miniserver als leerer Wert an.
+ */
+function ev_mqtt_leer_themen()
+{
+    $l = ev_retain_liste();
+    $t = array_keys($l['anlage']);
+    for ($i = 1; $i <= EV_LADEPUNKTE; $i++) {
+        foreach (array_keys($l['ladepunkt']) as $k) { $t[] = 'lp' . $i . '_' . $k; }
+    }
+    for ($i = 1; $i <= EV_FAHRZEUGE; $i++) {
+        foreach (array_keys($l['fahrzeug']) as $k) { $t[] = 'fz' . $i . '_' . $k; }
+    }
+    foreach (array_keys(ev_mqtt_altlast_liste()) as $k) {
+        if (!in_array($k, $t, true)) { $t[] = $k; }
+    }
+    return $t;
+}
+
+/**
+ * Die zurueckbehaltenen Themen leeren - fuer uninstall/uninstall
+ * (bin/ev_abruf.php --mqtt-leeren).
+ *
+ * Geloescht wird ueber den UDP-Eingang des Gateways, "retain <thema> " mit
+ * leerer Nutzlast. VOR der ersten Runde und nach jeder wird der Broker
+ * gefragt (ev_mqtt_behalten_liste()); hinaus geht nur, was dort noch steht,
+ * hoechstens $runden Runden. Steht nichts da, geht nichts hinaus. Ist der
+ * Broker nicht zu fragen, gehen alle Themen in jeder Runde hinaus, und die
+ * Ausgabe sagt, dass nicht nachgelesen wurde - der Eingang verwirft unter
+ * Last Datagramme (Regeln/07), ein blosses Senden ist kein Beleg. Bauart
+ * bw_mqtt_leeren() (Beschattungswaechter 0.9.21).
+ *
+ * Rueckgabe 0 geleert oder nicht nachpruefbar, 1 es steht noch etwas bzw.
+ * der Eingang war nicht erreichbar, 2 nicht moeglich.
+ */
+function ev_mqtt_leeren($runden = 3, $pause_us = 1000000)
+{
+    $c = ev_config(false);
+    $w = ev_mqtt_thema($c['mqtt_topic']);
+    $z = ev_mqtt_zustand();
+    if (!$z['udpport']) {
+        echo '<INFO> MQTT: in der general.json steht kein UDP-Eingangsport des Gateways - '
+           . 'zurueckbehaltene Themen unter ' . $w . '/ wurden nicht geleert.' . "\n";
+        return 2;
+    }
+    $alle = array();
+    foreach (ev_mqtt_leer_themen() as $t) { $alle[] = ev_mqtt_thema($w . '/' . $t); }
+    $n = count($alle);
+    $f = ev_mqtt_behalten_liste($alle);
+    $nachgelesen = ($f['lage'] === 'ok');
+    $offen = $nachgelesen ? array_keys($f['belegt']) : $alle;
+    if ($nachgelesen && !$offen) {
+        echo '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen unter ' . $w
+           . '/ steht zurueckbehalten - nichts zu leeren.' . "\n";
+        return 0;
+    }
+    $eno = 0;
+    $etxt = '';
+    $fp = @stream_socket_client('udp://127.0.0.1:' . (int) $z['udpport'], $eno, $etxt, 2);
+    if (!$fp) {
+        echo '<WARNING> MQTT: der UDP-Eingang des Gateways ist nicht erreichbar (Port '
+           . (int) $z['udpport'] . ') - zurueckbehaltene Themen unter ' . $w
+           . '/ wurden nicht geleert.' . "\n";
+        return 1;
+    }
+    $zu_leeren = count($offen);
+    $datagramme = 0;
+    $gelaufen = 0;
+    for ($r = 1; $r <= max(1, (int) $runden) && $offen; $r++) {
+        if ($r > 1) { usleep((int) $pause_us); }
+        $gelaufen = $r;
+        foreach ($offen as $t) {
+            // Ein Leerzeichen hinter dem Thema, sonst keine Nutzlast: die
+            // Form, die das Gateway als Loeschung liest (Regeln/07, Nachtrag
+            // 19.09.2026: mqttgateway.pl:281, :311-315, :357).
+            if (@fwrite($fp, 'retain ' . $t . ' ') !== false) { $datagramme++; }
+        }
+        usleep(300000);     // dem Gateway Zeit bis zum Broker lassen
+        $f = ev_mqtt_behalten_liste($offen);
+        if ($f['lage'] === 'ok') {
+            $nachgelesen = true;
+            $offen = array_keys($f['belegt']);
+        } else {
+            $nachgelesen = false;
+        }
+    }
+    fclose($fp);
+    echo '<INFO> MQTT: ' . $zu_leeren . ' von ' . $n . ' Themen unter ' . $w . '/ mit leerer Nutzlast '
+       . 'an den UDP-Eingang ' . (int) $z['udpport'] . ' des Gateways gesendet (' . $gelaufen
+       . ' Runde(n), ' . $datagramme . ' Datagramme).' . "\n";
+    if ($nachgelesen && !$offen) {
+        echo '<OK> MQTT: der Broker bestaetigt: keines der ' . $n . ' Themen steht mehr '
+           . 'zurueckbehalten.' . "\n";
+        return 0;
+    }
+    if ($nachgelesen) {
+        echo '<WARNING> MQTT: ' . count($offen) . ' Themen stehen noch zurueckbehalten im Broker ('
+           . implode(', ', array_slice($offen, 0, 5)) . (count($offen) > 5 ? ', ...' : '')
+           . '). Von Hand: mosquitto_pub -r -n -t <thema> (mit den Broker-Zugangsdaten).' . "\n";
+        return 1;
+    }
+    echo '<INFO> MQTT: der Broker liess sich nicht befragen - nicht nachgelesen. Der UDP-Eingang '
+       . 'verwirft unter Last Datagramme; was stehen bleibt, laesst sich mit '
+       . 'mosquitto_pub -r -n -t <thema> von Hand loeschen.' . "\n";
+    return 0;
+}
+
+/**
+ * Das Lebenszeichen: geht in JEDEM Lauf hinaus, auch unveraendert, und nie
+ * retained (Regeln/07, Abschnitt 3). Alles andere nur bei Aenderung und im
+ * Vollversand (ev_mqtt_publish()).
+ */
+function ev_mqtt_lebenszeichen_liste()
+{
+    return array('ok', 'ts', 'dienst', 'betriebsbereit');
+}
+
+/**
+ * Felder, die NICHT ueber MQTT gehen. alter_s: ueber MQTT gibt es kein Alter,
+ * nur einen Zeitstempel (Regeln/07, Abschnitt 3) - ein Alter ist in dem
+ * Augenblick falsch, in dem es ankommt, und es haette jeden Aenderungsfilter
+ * wirkungslos gemacht (es aendert sich in jedem Lauf). Es war nie retained
+ * (Tabelle seit 0.9.29; davor ging alles publish, am Geraet 10.09.2026:
+ * --retained-only 0), ein Altwert im Broker kann also nicht stehen. Ueber HTTP
+ * bleibt ALTER_S. Seit 0.9.33.
+ */
+function ev_mqtt_nicht_senden()
+{
+    return array('alter_s');
+}
+
+/**
+ * Die Sendeliste: was zuletzt unter welchem Praefix hinausging, und wann der
+ * letzte Vollversand war. Sie liegt im Zwischenspeicher (/tmp, auf dem
+ * LoxBerry eine RAM-Scheibe): nach einem Neustart des LoxBerry fehlt sie, und
+ * der erste Lauf sendet alles.
+ */
+function ev_mqtt_gesendet_datei()
+{
+    return ev_tmpdir() . '/mqtt_gesendet.json';
+}
+
+/**
+ * Kennung der eingespielten Fassung: Aenderungszeit und Groesse dieser Datei.
+ * Ein Update spielt sie neu ein (plugininstall.pl kopiert ohne -p) - danach
+ * gilt die alte Sendeliste nicht, und der erste Lauf sendet alles.
+ */
+function ev_mqtt_fassung()
+{
+    clearstatcache(true, __FILE__);
+    return (int) @filemtime(__FILE__) . '-' . (int) @filesize(__FILE__);
+}
+
+function ev_mqtt_publish($werte = null, $voll = false)
 {
     $cfg = ev_config();
-    if (empty($cfg['mqtt_ein'])) { return 0; }
+    if (empty($cfg['mqtt_ein'])) {
+        // Wird MQTT wieder eingeschaltet, beginnt es mit einem Vollversand.
+        @unlink(ev_mqtt_gesendet_datei());
+        return 0;
+    }
     $z = ev_mqtt_zustand();
     if (!$z['udpport']) {
         ev_log_wenn_neu('mqtt', 'kein UDP-Eingangsport in der general.json - Gateway eingerichtet?');
         return 0;
     }
     if ($werte === null) { $werte = ev_werte(); }
+    /* Hat EVCC in diesem Lauf geantwortet? Nur dann gehen die Themen der
+     * Retain-Tabelle retained hinaus (siehe ev_retain_liste()). Bis 0.9.32
+     * gingen bei einem gescheiterten Abruf die Platzhalter retained ueber den
+     * zuletzt gemeldeten Stand - ohne Zwischenspeicher wurde aus dem Lademodus
+     * 3 im Broker eine 0 (in WSL gemessen, Pruefung-EVCC-0.9.33, Faelle R10,
+     * R11) -, und fehler_nr 1 (keine Antwort) blieb nach dem Ende des Dienstes
+     * fuer immer stehen (R8, R9). */
+    $ev_antwort = isset($werte['ok']['wert']) && (int) $werte['ok']['wert'] === 1;
+    $ev_praefix = ev_mqtt_thema($cfg['mqtt_topic']);
+    /* Die Altwerte, die der Broker noch haelt (oder alle, wenn er nicht zu
+     * fragen war), bekommen eine leere retain-Nutzlast UNMITTELBAR vor ihrem
+     * gueltigen Wert - im selben Versand, als Nachbarzeile. Jedes Altthema hat
+     * in diesem Versand einen Wert (ev_mqtt_altlast_liste() nimmt nur die
+     * Themen dieses Laufs); eine leere Nachricht ohne Wert dahinter entsteht
+     * also nicht. */
+    $ev_weg = array_flip(ev_mqtt_altlast($ev_praefix, $werte)['themen']);
+    /* NUR AENDERUNGEN, das Lebenszeichen in jedem Lauf, alles im groben Takt
+     * (seit 0.9.33; Regeln/07, Abschnitt 2: "Wer regelmaessig viele Werte
+     * veroeffentlicht, sendet nur Aenderungen und den vollen Satz in grobem
+     * Takt").
+     *
+     * Bis 0.9.32 gingen in jedem Lauf alle Themen hinaus - bei Takt 15 s und
+     * zwei Ladepunkten rund 109 Datagramme je Lauf. Am Geraet stammten davon
+     * 82 % des gesamten Verkehrs am UDP-Eingang des Gateways (Regeln/07,
+     * Gateway-Protokoll 07.09.2026: 600 Datagramme in 83 s), und dieser Eingang verwirft
+     * unter Last Datagramme - auch die der anderen Plugins. In WSL gemessen
+     * (Pruefung-EVCC-0.9.33, Faelle N1-N3): unveraendert 4 statt 109.
+     *
+     * Vollversand: ohne Sendeliste (erster Lauf, Neustart des LoxBerry, MQTT
+     * wieder eingeschaltet), nach einem Pluginstart (andere Fassung), nach
+     * einem Praefixwechsel, auf Wunsch ($voll, Knopf im Reiter Test) und
+     * alle mqtt_vollsend_min Minuten (0 = nie im Takt) - damit ein
+     * Miniserver, der ohne den LoxBerry neu startet, nach spaetestens dieser
+     * Zeit wieder alle fluechtigen Werte hat. Eine Aenderung von Wert ODER
+     * Verb (retain/publish) zaehlt; ein Altthema geht immer hinaus, damit die
+     * leere Nutzlast ihren gueltigen Wert dahinter hat.
+     *
+     * Grenze: der UDP-Eingang bestaetigt nichts. Geht eine Aenderung dort
+     * verloren, steht sie bis zur naechsten Aenderung oder zum naechsten
+     * Vollversand nicht in Loxone (Regeln/07, "Ein Absender merkt nichts
+     * davon"). */
+    $ev_liste = @json_decode((string) @file_get_contents(ev_mqtt_gesendet_datei()), true);
+    $ev_kennung = $ev_praefix . '|' . ev_mqtt_fassung();
+    $ev_takt = (int) $cfg['mqtt_vollsend_min'];
+    if (!is_array($ev_liste) || !isset($ev_liste['kennung'], $ev_liste['voll'], $ev_liste['werte'])
+        || !is_array($ev_liste['werte']) || (string) $ev_liste['kennung'] !== $ev_kennung
+        || ($ev_takt > 0 && (time() - (int) $ev_liste['voll']) >= $ev_takt * 60)) {
+        $voll = true;
+    }
+    $ev_alt = $voll ? array() : $ev_liste['werte'];
+    $ev_neu = $ev_alt;
+    $ev_leben = array_flip(ev_mqtt_lebenszeichen_liste());
+    $ev_nicht = array_flip(ev_mqtt_nicht_senden());
     /* Datenstrom statt socket_create.
      *
      * socket_* steckt in der Erweiterung php-sockets, die nicht garantiert
@@ -2021,21 +2576,47 @@ function ev_mqtt_publish($werte = null)
     }
     $n = 0;
     $behalten = 0;
+    $versucht = 0;
     foreach ($werte as $name => $d) {
+        if (isset($ev_nicht[$name])) { continue; }
         /* Erst die Nutzlast, dann das Verb: eine leere Nutzlast LOESCHT ein
          * zurueckbehaltenes Thema, sie darf deshalb nie mit retain hinaus. */
         $nutz = ev_mqtt_nutzlast($d['wert']);
-        $verb = ev_retain_fuer($name, $nutz) ? 'retain' : 'publish';
-        $msg = $verb . ' ' . ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $name)
-             . ' ' . $nutz;
+        $verb = ($ev_antwort && ev_retain_fuer($name, $nutz)) ? 'retain' : 'publish';
+        $thema = ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $name);
+        $ev_zeile = $verb . ' ' . $nutz;
+        if (!$voll && !isset($ev_leben[$name]) && !isset($ev_weg[$name])
+            && isset($ev_alt[$name]) && (string) $ev_alt[$name] === $ev_zeile) {
+            continue;
+        }
+        $versucht++;
+        if (isset($ev_weg[$name])) {
+            /* Ein Leerzeichen hinter dem Thema, sonst keine Nutzlast: die
+             * Form, die das Gateway als Loeschung liest (Regeln/07, Nachtrag
+             * 19.09.2026: mqttgateway.pl:281, :311-315, :357). */
+            @fwrite($sock, 'retain ' . $thema . ' ');
+        }
+        $msg = $verb . ' ' . $thema . ' ' . $nutz;
         if (@fwrite($sock, $msg) !== false) {
             $n++;
             if ($verb === 'retain') { $behalten++; }
+            // Das Lebenszeichen geht ohnehin jedes Mal; es steht nicht in der Liste.
+            if (!isset($ev_leben[$name])) { $ev_neu[$name] = $ev_zeile; }
         }
     }
     fclose($sock);
-    if ($n < count($werte)) {
-        ev_log_wenn_neu('mqtt_teil', sprintf('nur %d von %d Themen gesendet', $n, count($werte)));
+    if ($n < $versucht) {
+        ev_log_wenn_neu('mqtt_teil', sprintf('nur %d von %d Themen gesendet', $n, $versucht));
+    }
+    if ($voll || $ev_neu !== $ev_alt) {
+        $ev_datei = ev_mqtt_gesendet_datei();
+        $ev_js = json_encode(array(
+            'kennung' => $ev_kennung,
+            'voll' => $voll ? time() : (int) $ev_liste['voll'],
+            'werte' => $ev_neu));
+        if ($ev_js !== false && @file_put_contents($ev_datei . '.neu', $ev_js) !== false) {
+            if (!@rename($ev_datei . '.neu', $ev_datei)) { @unlink($ev_datei . '.neu'); }
+        }
     }
     return $n;
 }
@@ -2432,8 +3013,17 @@ function ev_t($schluessel)
     static $texte = null;
     if ($texte === null) {
         $p = ev_paths();
-        $pfad = $p['home'] . '/templates/plugins/' . $p['plugin'] . '/lang';
-        if (!is_dir($pfad)) {
+        /* Ohne Wurzel NUR die eigenen Sprachdateien. Bis 0.9.32 wurde der
+         * Installationspfad auch mit leerer Wurzel gebildet und abgefragt -
+         * aus dem ausgepackten Archiv also /templates/plugins/evcc/lang ab der
+         * Laufwerkswurzel; lag dort etwas, zeigte die Oberflaeche fremde Texte
+         * (in WSL gemessen, Pruefung-EVCC-0.9.33, Fall T1; Bauart zd_t() aus
+         * ZendureSolarFlow 0.9.26). */
+        $pfad = '';
+        if ($p['home'] !== '' && is_dir($p['home'] . '/templates/plugins/' . $p['plugin'] . '/lang')) {
+            $pfad = $p['home'] . '/templates/plugins/' . $p['plugin'] . '/lang';
+        }
+        if ($pfad === '') {
             // Nicht installiert (Entwicklung): neben dem Plugin nachsehen.
             $pfad = dirname(dirname(__DIR__)) . '/templates/lang';
         }
@@ -2791,10 +3381,8 @@ function ev_endpunkt_kandidaten()
 {
     $p = ev_paths();
     if ($p['home'] === '') { return array(); }
-    $html = $p['home'] . '/webfrontend/html/plugins/' . $p['plugin'];
     return array(
         $p['home'] . '/webfrontend/htmlauth/plugins/' . $p['plugin'] . '/ev_lib.php',
-        dirname($html) . '/htmlauth/ev_lib.php',
     );
 }
 
@@ -2899,6 +3487,8 @@ function ev_wert_pruefen($schluessel, $wert)
             return preg_match('/^[A-Za-z0-9_.\-]{0,64}$/', $s) === 1;
         case 'mqtt_topic':
             return preg_match('#^[A-Za-z0-9_/\-]{1,64}$#', $s) === 1;
+        case 'mqtt_vollsend_min':
+            return preg_match('/^[0-9]{1,4}$/', $s) === 1 && (int) $s <= 1440;
         case 'takt':
             return preg_match('/^[0-9]{1,3}$/', $s) === 1
                    && (int) $s >= 5 && (int) $s <= 60;

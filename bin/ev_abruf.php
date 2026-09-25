@@ -13,6 +13,8 @@
  *   ev_abruf.php cron     eine Minute lang im Takt abrufen (aus dem Cron)
  *   ev_abruf.php einmal   genau ein Abruf, dann Schluss
  *   ev_abruf.php test     ein Abruf mit Klartextausgabe
+ *   ev_abruf.php --mqtt-leeren   die zurueckbehaltenen MQTT-Themen der Linie
+ *                         leeren (fuer uninstall/uninstall, seit 0.9.33)
  *
  * Der Abruf gehoert NICHT in die Oberflaeche und nicht in den Endpunkt -
  * ein Plugin, das beim Klick auf die Seite Daten holt, ist falsch gebaut.
@@ -20,36 +22,33 @@
 
 error_reporting(E_ALL & ~E_DEPRECATED & ~E_NOTICE);
 
-/* Die Bibliothek ueber eine Kandidatenliste finden - NICHT ueber eine feste
- * Zahl von ".." nach oben.
+/* Die Bibliothek finden - nach dem EIGENEN Ablageort, nicht ueber eine feste
+ * Zahl von ".." nach oben und nicht ueber eine Reihe von Wetten.
  *
  * Im entpackten Archiv liegen bin/ und webfrontend/ nebeneinander, auf dem
  * installierten LoxBerry in GETRENNTEN Baeumen:
  *
- *     /opt/loxberry/bin/plugins/<ordner>/ev_abruf.php
- *     /opt/loxberry/webfrontend/htmlauth/plugins/<ordner>/ev_lib.php
+ *     <LoxBerry>/bin/plugins/<ordner>/ev_abruf.php
+ *     <LoxBerry>/webfrontend/htmlauth/plugins/<ordner>/ev_lib.php
  *
- * dirname(__DIR__) ergibt dort /opt/loxberry/bin/plugins - gesucht wurde also
- * /opt/loxberry/bin/plugins/webfrontend/htmlauth/ev_lib.php. Die gibt es nicht: der
- * Dienst brach bei JEDEM Cron-Lauf mit einem fatalen Fehler ab, und weil die
- * Cron-Zeile nach /dev/null schreibt, stand das nirgends.
+ * Bis 0.9.8 stand hier nur dirname(__DIR__): installiert gab es die Datei
+ * dort nicht, der Dienst brach bei JEDEM Cron-Lauf ab, und weil die
+ * Cron-Zeile nach /dev/null schrieb, stand das nirgends (gefunden am
+ * 16.08.2026 mit Werkzeuge/installationslage_pruefen.py).
  *
- * Gefunden am 16.08.2026 mit Werkzeuge/installationslage_pruefen.py, nachdem
- * dieselbe Zeile den Hintergrunddienst des Abfahrts-Assistenten von 1.5.0 bis
- * 1.5.7 lahmgelegt hatte.
+ * Bis 0.9.32 wurden danach drei Kandidaten der Reihe nach probiert. Aus einem
+ * Archiv unter / war der zweite /webfrontend/htmlauth/plugins/bin/ev_lib.php
+ * ab der Laufwerkswurzel, und was dort lag, lief als Bibliothek (in WSL
+ * gemessen, Pruefung-EVCC-0.9.33, Fall T3). Jetzt entscheidet der Ablageort:
+ * liegt diese Datei unter .../plugins/<ordner>, ist sie installiert, sonst
+ * gilt nur die Bibliothek des eigenen Archivs. Bauart ZendureSolarFlow 0.9.26.
  */
-$ev_lb = getenv('LBHOMEDIR');
-$ev_ordner = getenv('LBPPLUGINDIR') ?: basename(__DIR__);
-$ev_kandidaten = array();
-if ($ev_lb) {
-    $ev_kandidaten[] = $ev_lb . '/webfrontend/htmlauth/plugins/' . $ev_ordner . '/ev_lib.php';
+if (basename(dirname(__DIR__)) === 'plugins') {
+    $ev_kandidaten = array(dirname(dirname(dirname(__DIR__)))
+        . '/webfrontend/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php');
+} else {
+    $ev_kandidaten = array(dirname(__DIR__) . '/webfrontend/htmlauth/ev_lib.php');
 }
-// installiert, ohne dass die Umgebungsvariablen gesetzt waeren:
-// .../bin/plugins/<ordner>  ->  .../webfrontend/htmlauth/plugins/<ordner>
-$ev_kandidaten[] = dirname(dirname(dirname(__DIR__)))
-                 . '/webfrontend/htmlauth/plugins/' . basename(__DIR__) . '/ev_lib.php';
-// entpacktes Archiv: bin/ und webfrontend/ liegen nebeneinander
-$ev_kandidaten[] = dirname(__DIR__) . '/webfrontend/htmlauth/ev_lib.php';
 
 $ev_lib = '';
 foreach ($ev_kandidaten as $ev_kand) {
@@ -62,7 +61,41 @@ if ($ev_lib === '') {
 }
 require_once $ev_lib;
 
+/* Ohne installierte Lage NICHTS tun (seit 0.9.33).
+ *
+ * Bis 0.9.32 lief dieses Programm aus einem ausgepackten Archiv einfach los:
+ * unter einer echten Wurzel (auch nur mit $LBHOMEDIR aus /etc/environment)
+ * legte es dort Konfiguration mit frischem Token und Protokoll an und sandte
+ * an das MQTT-Gateway der Anlage; ohne Wurzel schrieb es nach /tmp/evcc - auf
+ * einem LoxBerry der Zwischenspeicher der Anlage (in WSL gemessen,
+ * Pruefung-EVCC-0.9.33, Faelle W11-W13, T4, T5). Wer ein Archiv ausdruecklich
+ * gegen eine Anlage laufen lassen will, setzt LBHOMEDIR UND LBPPLUGINDIR
+ * (ev_paths(), Archivmodus). Bauart tb_keine_wurzel_abbruch() aus
+ * Spotpreis-Tibber 0.9.19. */
+$ev_pf = ev_paths();
+if ($ev_pf['home'] === '') {
+    if ($ev_pf['archiv'] !== '') {
+        fwrite(STDERR, 'EVCC: Diese Datei liegt nicht in der Installation unter '
+            . $ev_pf['archiv'] . " (ausgepacktes Archiv oder Pruefordner).\n"
+            . "Damit nichts in die Anlage kommt, wurde nichts geholt, nichts gesendet und nichts geschrieben.\n"
+            . 'Abhilfe: das Programm aus ' . $ev_pf['archiv'] . "/bin/plugins/<ordner> aufrufen\n"
+            . "oder LBHOMEDIR und LBPPLUGINDIR ausdruecklich setzen.\n");
+    } else {
+        fwrite(STDERR, "EVCC: Es wurde kein LoxBerry-Wurzelverzeichnis gefunden.\n"
+            . '$LBHOMEDIR ist nicht gesetzt, und oberhalb von ' . __DIR__ . " traegt kein\n"
+            . "Verzeichnis config/plugins, data/plugins und config/system/general.json.\n"
+            . "Es wurde nichts geholt, nichts gesendet und nichts geschrieben.\n");
+    }
+    exit(1);
+}
+
 $modus = isset($argv[1]) ? (string) $argv[1] : 'einmal';
+
+/* Fuer uninstall/uninstall: die zurueckbehaltenen Themen der Linie leeren
+ * (seit 0.9.33, Regeln/07 Abschnitt 3). Rueckgabe wie ev_mqtt_leeren(). */
+if ($modus === '--mqtt-leeren') {
+    exit(ev_mqtt_leeren());
+}
 
 /** Ein Durchlauf: holen, umrechnen, veroeffentlichen. */
 function ev_durchlauf($laut = false)

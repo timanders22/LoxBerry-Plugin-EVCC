@@ -4,68 +4,157 @@
 # EVCC wird BEWUSST NICHT mitentfernt. Wer das Plugin deinstalliert, will
 # meistens nur die Loxone-Anbindung los - nicht seine eingerichtete
 # Wallbox-Steuerung samt Datenbank. Das Entfernen steht in der Anleitung.
-ARGV1=$1   # Plugin-Verzeichnisname
-
-echo "<INFO> Entferne die sudo-Regel des Plugins"
-rm -f /etc/sudoers.d/loxberry-evcc
-
-# Konfiguration mit entfernen.
 #
-# In evcc.json steht das EVCC-Passwort IM KLARTEXT, dazu das Zugriffstoken
-# des unangemeldeten Miniserver-Endpunkts. Bis 0.9.0 blieb die Datei nach
-# der Deinstallation liegen - mitsamt beidem, und ohne dass irgendwo stand,
-# dass sie noch da ist. Wer ein Plugin entfernt, geht davon aus, dass seine
-# Zugangsdaten mitgehen.
+# Argumente, wie der Installer sie uebergibt (plugininstall.pl:1577, am
+# Geraet nachgesehen 17.09.2026, Regeln/06):
+#   <ZUFALLSKENNUNG> <NAME> <FOLDER> <VERSION> <BASEFOLDER> <TEMPFOLDER>
+# Das Skript liegt dabei als <LoxBerry>/data/system/uninstall/<ordner>.
 #
-# LoxBerry raeumt config/ und data/ beim Entfernen normalerweise selbst auf.
-# Verlassen wird sich darauf hier NICHT: der Aufwand ist ein rm, und der
-# Schaden im Fehlerfall ist ein Passwort auf der Platte.
-LBHOME="$LBHOMEDIR"
-# Dritter Rueckfall: der eigene Ablageort. Bewusst kein fest verdrahteter
-# Systempfad - LoxBerry laesst sich anderswohin installieren, und der
-# Plugin-Pruefer sucht die Zeichenkette, ohne den Zusammenhang zu sehen.
-# Der Installer legt dieses Skript als <home>/data/system/uninstall/<ordner>
-# ab und uebergibt die LoxBerry-Wurzel als fuenftes Argument
-# (plugininstall.pl:1158 und :1577, am Geraet nachgesehen 17.09.2026);
-# dieser Zweig greift nur, wenn beides fehlt.
-if [ -z "$LBHOME" ] || [ ! -d "$LBHOME" ]; then
-    LBHOME=$(cd "$(dirname "$(readlink -f "$0")")/../../.." 2>/dev/null && pwd)
+# DER ORDNERNAME KOMMT AUS $3, NICHT AUS $1 (seit 0.9.33).
+# Bis 0.9.32 stand hier PDIR=${1:-evcc}. $1 ist die zehnstellige
+# Zufallskennung des Installers: entfernt wurden damit
+# config/plugins/<Zufallskennung>/ und <Zufallskennung>.backup.evcc.json -
+# also nichts. Liegen blieb die Zweitschrift config/plugins/evcc.backup.evcc.json
+# mit dem EVCC-Passwort im Klartext und dem Token des unangemeldeten
+# Endpunkts, und die Meldung weiter unten sagte, beides sei geloescht (in WSL
+# gemessen, Pruefung-EVCC-0.9.33, Fall W1). Der Pruefstand der 0.9.32 hatte
+# den Ordner als erstes Argument uebergeben und den Fehler so nicht gesehen.
+PDIR="${3:-evcc}"
+case "$PDIR" in
+    ''|.|..|*/*)
+        echo "<WARNING> Unbrauchbarer Pluginordner '$PDIR' - es wurde nichts entfernt."
+        exit 1
+        ;;
+esac
+
+# DIE WURZEL WIRD GEPRUEFT, NICHT GEGLAUBT (seit 0.9.33) - dieselbe Pruefung
+# wie in preupgrade.sh und postupgrade.sh. Ein Verzeichnis zaehlt nur als
+# LoxBerry-Wurzel, wenn es config/plugins, data/plugins UND
+# config/system/general.json traegt (Regeln/06). Reihenfolge: fuenftes
+# Argument, LBHOMEDIR, dann aufwaerts vom Ablageort dieses Skripts,
+# hoechstens acht Ebenen. Ohne Wurzel wird gewarnt und NICHTS getan - auch
+# nichts unter /etc.
+#
+# Bis 0.9.32 galt LBHOMEDIR ungeprueft und danach fest drei Ebenen ueber dem
+# Ablageort: aus einem fremden Baum heraus loeschte das Skript dort als root
+# die Upgrade-Sicherung (in WSL gemessen, Pruefung-EVCC-0.9.33, Fall W3).
+ev_ist_loxberry() {
+    [ -n "$1" ] && [ -d "$1/config/plugins" ] && [ -d "$1/data/plugins" ] \
+        && [ -f "$1/config/system/general.json" ]
+}
+ev_wurzel_suchen() {
+    v=$(cd "$(dirname "$(readlink -f "$0")")" 2>/dev/null && pwd)
+    i=0
+    while [ -n "$v" ] && [ "$v" != "/" ] && [ $i -lt 8 ]; do
+        if ev_ist_loxberry "$v"; then
+            echo "$v"
+            return 0
+        fi
+        v=$(dirname "$v")
+        i=$((i + 1))
+    done
+    return 1
+}
+LBHOME=""
+for EV_KAND in "${5:-}" "${LBHOMEDIR:-}"; do
+    if ev_ist_loxberry "$EV_KAND"; then
+        LBHOME="$EV_KAND"
+        break
+    fi
+done
+if [ -z "$LBHOME" ]; then
+    LBHOME=$(ev_wurzel_suchen) || LBHOME=""
 fi
-PDIR=${ARGV1:-evcc}
-for verzeichnis in "$LBHOME/config/plugins/$PDIR" "$LBHOME/data/plugins/$PDIR"; do
-    if [ -d "$verzeichnis" ]; then
-        rm -rf "$verzeichnis"
-        echo "<OK> $verzeichnis entfernt."
-    fi
-done
-# Die Zweitschrift liegt NEBEN dem Plugin-Ordner, nicht darin - siehe
-# ev_paths() in ev_lib.php. Das ist Absicht (LoxBerry raeumt
-# config/plugins/<ordner>/ bei der Deinstallation weg, und genau dann soll die
-# Sicherung ueberleben), hatte aber bis 0.9.10 eine haessliche Folge: die
-# Schleife oben entfernt nur Verzeichnisse, die Datei blieb liegen - mit dem
-# EVCC-Passwort im Klartext und dem Token des unangemeldeten Endpunkts. Und
-# zwei Zeilen darunter stand, beides sei geloescht.
+if [ -z "$LBHOME" ]; then
+    echo "<WARNING> Das Wurzelverzeichnis des LoxBerry war nicht zu ermitteln (fuenftes"
+    echo "<WARNING> Argument: '${5:-}', LBHOMEDIR: '${LBHOMEDIR:-}', Suche ab dem Ablageort"
+    echo "<WARNING> dieses Skripts ohne Treffer). Es wurde nichts entfernt."
+    echo "<WARNING> Liegen bleiben koennen <LoxBerry>/config/plugins/$PDIR.backup.evcc.json"
+    echo "<WARNING> und <LoxBerry>/data/plugins/$PDIR.upgrade_sicherung/ - mit dem"
+    echo "<WARNING> EVCC-Passwort und dem Token des Endpunkts. Bitte von Hand loeschen."
+    exit 1
+fi
+
+# ---------- 1. Die zurueckbehaltenen MQTT-Themen der Linie ----------
+# Regeln/07, Abschnitt 3: die Deinstallation raeumt sie ab. Bis 0.9.32
+# blieben bis zu 84 Themen unter <praefix>/ fuer immer im Broker und kamen
+# nach jedem Neustart von Broker oder Gateway wieder am Miniserver an (in
+# WSL gemessen, Pruefung-EVCC-0.9.33, Fall U1). Geloescht wird ueber den
+# UDP-Eingang des Gateways, der nichts bestaetigt; ev_mqtt_leeren() fragt
+# deshalb vorher und nach jeder Runde den Broker (hoechstens drei Runden,
+# Bauart Beschattungswaechter 0.9.21). VOR dem Loeschen der Ordner, denn
+# Praefix und Port stehen in der Konfiguration.
 #
-# Verschaerfend: ev_config() holt genau diese Datei bei einer NEUinstallation
-# stillschweigend zurueck. Eine saubere Neuinstallation war damit keine.
-for datei in "$LBHOME/config/plugins/$PDIR.backup.evcc.json" \
-             "$LBHOME/config/plugins/$PDIR.backup.evcc.json.neu" \
-             "$LBHOME/config/plugins/$PDIR/evcc.backup.json" \
-             "$LBHOME/config/plugins/$PDIR/evcc.json.kaputt"; do
-    if [ -f "$datei" ]; then
-        rm -f "$datei"
-        echo "<OK> $datei entfernt."
+# 'timeout -k 5 60': ohne -k schickt timeout nach 60 s nur SIGTERM - ein
+# Programm, das es nicht annimmt, hielte die Deinstallation an, und die
+# Zweitschrift mit den Zugangsdaten (Schritt 2) bliebe liegen. Nach 60 s
+# SIGTERM, nach weiteren 5 s SIGKILL, und der Abbruch steht als WARNING da
+# (Bauart Weissware 0.9.34; in WSL mit einem SIGTERM-festen Koeder gemessen,
+# Pruefung-EVCC-0.9.33, Faelle U3-U5). stdin geschlossen, damit su nie auf
+# eine Eingabe wartet. Rueckgabe 0-2 meldet ev_mqtt_leeren() selbst.
+EV_ABRUF="$LBHOME/bin/plugins/$PDIR/ev_abruf.php"
+if [ -f "$EV_ABRUF" ] && command -v php >/dev/null 2>&1; then
+    EV_RC=0
+    if [ "$(id -u)" = "0" ] && id loxberry >/dev/null 2>&1; then
+        su -s /bin/bash loxberry -c "$(printf '%q ' env "LBHOMEDIR=$LBHOME" "LBPPLUGINDIR=$PDIR" \
+            timeout -k 5 60 php "$EV_ABRUF" --mqtt-leeren)" < /dev/null 2>&1 || EV_RC=$?
+    else
+        env "LBHOMEDIR=$LBHOME" "LBPPLUGINDIR=$PDIR" \
+            timeout -k 5 60 php "$EV_ABRUF" --mqtt-leeren < /dev/null 2>&1 || EV_RC=$?
+    fi
+    case "$EV_RC" in
+        0|1|2) ;;
+        124) echo "<WARNING> MQTT: das Leeren der zurueckbehaltenen Themen wurde nach 60 s abgebrochen - unter dem Praefix der Linie kann noch etwas im Broker stehen. Von Hand: mosquitto_pub -r -n -t <thema>" ;;
+        137) echo "<WARNING> MQTT: das Leeren der zurueckbehaltenen Themen reagierte nach 60 s nicht auf SIGTERM und wurde hart beendet (SIGKILL) - unter dem Praefix der Linie kann noch etwas im Broker stehen. Von Hand: mosquitto_pub -r -n -t <thema>" ;;
+        *) echo "<WARNING> MQTT: das Leeren der zurueckbehaltenen Themen endete unerwartet (Rueckgabe $EV_RC) - unter dem Praefix der Linie kann noch etwas im Broker stehen." ;;
+    esac
+else
+    echo "<INFO> ev_abruf.php oder php fehlt - zurueckbehaltene MQTT-Themen wurden nicht geleert."
+fi
+
+# ---------- 2. Konfiguration, Zweitschrift, Sicherung ----------
+# In evcc.json steht das EVCC-Passwort IM KLARTEXT, dazu das Zugriffstoken
+# des unangemeldeten Miniserver-Endpunkts. LoxBerry raeumt config/ und data/
+# des Plugins beim Entfernen normalerweise selbst auf - aber nur die
+# VERZEICHNISSE. Die Zweitschrift liegt NEBEN dem Plugin-Ordner (siehe
+# ev_paths() in ev_lib.php), die Upgrade-Sicherung ebenso; genau deshalb
+# ueberstehen sie ein Update, und genau deshalb raeumt sie niemand ausser
+# diesem Skript weg. ev_config() holte die Zweitschrift sonst bei einer
+# NEUinstallation stillschweigend zurueck.
+echo "<INFO> Entferne Konfiguration, Zweitschrift und Upgrade-Sicherung"
+for verzeichnis in "$LBHOME/config/plugins/$PDIR" "$LBHOME/data/plugins/$PDIR" \
+                   "$LBHOME/data/plugins/$PDIR.upgrade_sicherung" \
+                   "$LBHOME/data/plugins/$PDIR.upgrade_sicherung.neu" \
+                   "$LBHOME/data/plugins/$PDIR.upgrade_sicherung.alt"; do
+    if [ -d "$verzeichnis" ]; then
+        rm -rf "$verzeichnis" && echo "<OK> $verzeichnis entfernt."
     fi
 done
-
+for datei in "$LBHOME/config/plugins/$PDIR.backup.evcc.json" \
+             "$LBHOME/config/plugins/$PDIR.backup.evcc.json.neu"; do
+    if [ -f "$datei" ]; then
+        rm -f "$datei" && echo "<OK> $datei entfernt."
+    fi
+done
 rm -rf "/tmp/${PDIR}_upgrade" "/run/shm/${PDIR}" "/tmp/${PDIR}" 2>/dev/null
-echo "<INFO> Zugangsdaten und Zugriffstoken des Plugins sind geloescht."
 
-# Was postroot.sh als root angelegt hat, gehoert auch wieder weg. Laeuft die
-# Deinstallation nicht als root, wird das ehrlich gesagt statt still zu
-# scheitern - ein Befehl, der genau dann nichts tut, wenn er gebraucht wird,
-# ist schlimmer als keiner.
-for datei in /usr/local/sbin/loxberry-evcc-update /etc/sudoers.d/loxberry-evcc; do
+# Gesagt wird, was WIRKLICH geschah - nicht, was vorhatte zu geschehen.
+EV_REST=""
+for datei in "$LBHOME/config/plugins/$PDIR/evcc.json" "$LBHOME/config/plugins/$PDIR.backup.evcc.json" \
+             "$LBHOME/data/plugins/$PDIR.upgrade_sicherung/evcc.json"; do
+    [ -e "$datei" ] && EV_REST="$EV_REST $datei"
+done
+if [ -z "$EV_REST" ]; then
+    echo "<OK> Zugangsdaten und Zugriffstoken des Plugins sind geloescht."
+else
+    echo "<WARNING> Noch vorhanden (bitte von Hand loeschen):$EV_REST"
+fi
+
+# ---------- 3. Was postroot.sh als root angelegt hat ----------
+# Laeuft die Deinstallation nicht als root, wird das ehrlich gesagt statt
+# still zu scheitern - ein Befehl, der genau dann nichts tut, wenn er
+# gebraucht wird, ist schlimmer als keiner.
+for datei in /etc/sudoers.d/loxberry-evcc /usr/local/sbin/loxberry-evcc-update; do
     if [ -e "$datei" ]; then
         if [ "$(id -u)" = "0" ]; then
             rm -f "$datei" && echo "<OK> $datei entfernt."
@@ -81,25 +170,4 @@ echo "<INFO>   sudo systemctl disable --now evcc"
 echo "<INFO>   sudo apt purge evcc"
 echo "<INFO>   sudo rm -f /etc/apt/sources.list.d/evcc-stable.list"
 echo "<INFO> Konfiguration und Datenbank liegen in /etc/evcc.yaml und /var/lib/evcc/."
-
-# ---------- Den Nachbarn der Sicherung wegraeumen ----------
-# data/plugins/<ordner>.upgrade_sicherung liegt AUSSERHALB des Ordners, den
-# LoxBerry beim Deinstallieren loescht - genau deshalb uebersteht er ein
-# Update. Wer ihn hier nicht abraeumt, laesst Zugangsdaten liegen.
-# $PDIR und $LBHOME oben sind sorgfaeltig hergeleitet - mit drei
-# Rueckfallebenen. Bis 0.9.26 stand hier stattdessen "${3:-}" und
-# "${5:-$LBHOMEDIR}": der Kopf dieser Datei kennt genau EIN Argument, also
-# war $3 leer, die Bedingung darunter falsch, und die Zeile lief nie. Liegen
-# blieb dann data/plugins/<ordner>.upgrade_sicherung/evcc.json - mit dem
-# EVCC-Passwort im Klartext und dem Token des unangemeldeten Endpunkts,
-# waehrend die Meldung oben sagt, beides sei geloescht.
-UN_FOLDER="${3:-$PDIR}"
-UN_BASE="${5:-$LBHOME}"
-if [ -n "$UN_FOLDER" ] && [ -n "$UN_BASE" ] && [ -d "$UN_BASE/data/plugins" ]; then
-    # .neu und .alt: seit 0.9.32 baut preupgrade.sh die Sicherung daneben;
-    # ein abgebrochenes Update kann sie mit denselben Zugangsdaten hinterlassen.
-    rm -rf "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung" \
-           "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung.neu" \
-           "$UN_BASE/data/plugins/$UN_FOLDER.upgrade_sicherung.alt" 2>/dev/null
-fi
 exit 0
