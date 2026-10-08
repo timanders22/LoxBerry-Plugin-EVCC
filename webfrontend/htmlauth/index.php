@@ -544,6 +544,43 @@ if (class_exists('LBWeb', false)) {
 </ul></div>
 <?php } ?>
 
+<?php
+/* Kopf (Entscheidung Nr. 43, seit 0.9.40): Statusuebersicht ueber den
+ * Reitern, immer sichtbar. Hierher gewandert aus dem Reiter Einstellungen,
+ * wo bis 0.9.39 drei Kacheln standen.
+ * Nur der Zwischenspeicher des Abrufdienstes, keine eigene Anfrage an EVCC
+ * (O4, seit 0.9.34). Bis 0.9.33 fragte JEDER Seitenaufruf EVCC mit bis zu
+ * 8 s Zeitgrenze - bei haengendem EVCC wartete man auf jedem Reiter
+ * (Pruefbericht oberflaeche, Befund 7). */
+$ev_da = ev_dienst_vorhanden();
+$ev_laeuft = ev_dienst_laeuft();
+$ev_stand = ev_state_gespeichert();
+$ev_tokneu = ev_token_neu();
+$ev_ein = ev_einrichtung($ev_stand);
+$ev_abruf = !empty($ev_stand['stand']) ? (int) $ev_stand['stand'] : 0;
+$ev_lp_da = isset($ev_stand['roh']['loadpoints']) && is_array($ev_stand['roh']['loadpoints']);
+?>
+<table class="sm-tbl" style="max-width:620px">
+<tr><th><?= ev_e(ev_t('KACHEL.EIGENSCHAFT')) ?></th><th><?= ev_e(ev_t('KACHEL.WERT')) ?></th></tr>
+<tr><td><?= ev_e(ev_t('KACHEL.EVCC')) ?></td>
+    <td class="<?= $ev_laeuft ? 'sm-an' : 'sm-aus' ?>"><?= ev_e($ev_laeuft ? ev_t('ALLG.LAEUFT')
+        : ($ev_da ? ev_t('ALLG.GESTOPPT') : ev_t('KACHEL.NICHT_INSTALLIERT'))) ?></td></tr>
+<tr><td><?= ev_e(ev_t('KACHEL.VERBINDUNG')) ?></td>
+    <?= (empty($ev_stand['stand']) && empty($ev_stand['fehler']))
+        ? '<td>' . ev_e(ev_t('ALLG.UNBEKANNT')) . '</td>'
+        : '<td class="' . (!empty($ev_stand['ok']) ? 'sm-an' : 'sm-aus') . '">'
+          . ev_e(!empty($ev_stand['ok']) ? ev_t('ALLG.OK') : ev_t('ALLG.FEHLER')) . '</td>' ?></tr>
+<tr><td><?= ev_e(ev_t('KACHEL.ABRUF')) ?></td>
+    <td><?= $ev_abruf > 0
+        ? ev_e(date('d.m.Y H:i:s', $ev_abruf))
+          . (time() - $ev_abruf < 3600 ? ' (' . sprintf(ev_e(ev_t('KACHEL.VOR_S')), max(0, time() - $ev_abruf)) . ')' : '')
+        : ev_e(ev_t('ALLG.UNBEKANNT')) ?></td></tr>
+<tr><td><?= ev_e(ev_t('KACHEL.LADEPUNKTE')) ?></td>
+    <td><?= $ev_lp_da ? (int) $ev_ein['ladepunkte'] : '&ndash;' ?></td></tr>
+<tr><td><?= ev_e(ev_t('KACHEL.VERSION')) ?></td>
+    <td><?= ev_e($ev_da ? ev_dienst_version() : '-') ?></td></tr>
+</table>
+
 <!-- Reiterleiste: echte Links, JavaScript faengt den Klick ab. Warum beides:
      Der Link traegt die Adresse - jeder Reiter ist damit verlinkbar, und die
      Zurueck-Taste tut das Erwartete.
@@ -566,31 +603,11 @@ if (class_exists('LBWeb', false)) {
 <!-- ================= Reiter: Einstellungen ================= -->
 <div class="sm-seite<?= $ev_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
 
-<?php
-$ev_da = ev_dienst_vorhanden();
-$ev_laeuft = ev_dienst_laeuft();
-/* Nur der Zwischenspeicher des Abrufdienstes, keine eigene Anfrage an EVCC
- * (O4, seit 0.9.34). Bis 0.9.33 fragte JEDER Seitenaufruf EVCC mit bis zu
- * 8 s Zeitgrenze - bei haengendem EVCC wartete man auf jedem Reiter
- * (Pruefbericht oberflaeche, Befund 7). */
-$ev_stand = ev_state_gespeichert();
-$ev_tokneu = ev_token_neu();
-?>
+<div class="sm-hinweis"><?= ev_t('EINST.WAS_IST_DAS') ?></div>
+
 <?php if ($ev_tokneu !== null) { ?>
 <div class="sm-warnung"><?= sprintf(ev_t('EINST.TOKEN_NEU'), ev_e(date('d.m.Y H:i', $ev_tokneu[0])), ev_e($ev_tokneu[1])) ?></div>
 <?php } ?>
-<div class="sm-kacheln">
-  <div class="sm-kachel"><?= ev_e(ev_t('KACHEL.EVCC')) ?>
-    <b class="<?= $ev_laeuft ? 'sm-an' : 'sm-aus' ?>"><?= ev_e($ev_laeuft ? ev_t('ALLG.LAEUFT') : ev_t('ALLG.GESTOPPT')) ?></b></div>
-  <div class="sm-kachel"><?= ev_e(ev_t('KACHEL.VERBINDUNG')) ?>
-    <?php if (empty($ev_stand['stand']) && empty($ev_stand['fehler'])) { ?>
-    <b><?= ev_e(ev_t('ALLG.UNBEKANNT')) ?></b></div>
-    <?php } else { ?>
-    <b class="<?= !empty($ev_stand['ok']) ? 'sm-an' : 'sm-aus' ?>"><?= ev_e(!empty($ev_stand['ok']) ? ev_t('ALLG.OK') : ev_t('ALLG.FEHLER')) ?></b></div>
-    <?php } ?>
-  <div class="sm-kachel"><?= ev_e(ev_t('KACHEL.VERSION')) ?>
-    <b style="font-size:1.0em;"><?= ev_e($ev_da ? ev_dienst_version() : '-') ?></b></div>
-</div>
 
 <?php if (!$ev_da) { ?>
 <div class="sm-warnung"><?= ev_t('EINST.NICHT_INSTALLIERT') ?></div>
@@ -602,7 +619,7 @@ $ev_tokneu = ev_token_neu();
    einem Startfehler abgebrochen hat. Bis 0.9.12 stand hier nur die Kachel
    "Verbindung: in Ordnung", und die war sogar richtig. Nur eben nicht die
    ganze Wahrheit. */
-$ev_ein = ev_einrichtung($ev_stand);
+/* $ev_ein kommt seit 0.9.40 aus dem Kopf ueber der Reiterleiste. */
 if ($ev_ein['fatal'] !== '') { ?>
 <div class="sm-fehler"><?= sprintf(ev_t('EINST.EVCC_FATAL'), ev_e($ev_ein['fatal']), ev_e(ev_evcc_link())) ?></div>
 <?php } elseif ($ev_ein['einrichtung'] === 0) { ?>

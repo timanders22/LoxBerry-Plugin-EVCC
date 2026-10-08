@@ -9,6 +9,16 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.40
+
+Kopf wie alle Hausplugins: Statusübersicht über den Reitern, Zusammenfassung oben im ersten Reiter.
+
+* **Statusübersicht über den Reitern:** EVCC-Dienst, Verbindung, letzter gelungener Abruf, Zahl der
+  Ladepunkte und Fassung von EVCC – aus dem Zwischenspeicher des Abrufdienstes, ohne eigene Anfrage an
+  EVCC. Sie ersetzt die drei Kacheln, die bisher oben im Reiter Einstellungen standen.
+* **Zusammenfassung** des Plugins in einem grünen Kasten oben im Reiter Einstellungen.
+* Nur Oberfläche; gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 0.9.39
 
 Ansage bei Störung und Ladeende über die gemeinsame Sprachausgabe (ab Werk aus).
