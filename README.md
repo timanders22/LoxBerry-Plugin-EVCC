@@ -9,6 +9,22 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.39
+
+Ansage bei Störung und Ladeende über die gemeinsame Sprachausgabe (ab Werk aus).
+
+* **Drei Anlässe, je abwählbar:** EVCC liefert seit 5 Minuten keine Daten (Ausfall), EVCC meldet
+  einen Startfehler, ein Fahrzeug ist fertig geladen (Ladepunkt hört auf zu laden, Fahrzeug steckt,
+  Ladestand hat die Ladegrenze erreicht – ohne bekannten Fahrzeug-Ladestand keine Ansage, eine
+  Pause im PV-Modus sähe sonst genauso aus). Höchstens einmal je Anlass in 30 Minuten (Ladeende: je
+  Ladepunkt), nie Werte im Takt.
+* **Ausgabe:** Loxone Music Server, MusicServer4Home, eigene Adressvorlage, Alexa-NG oder
+  Google-Lautsprecher über Chromecast 4 Lox NG. Adresse und Vorlage müssen im Heimnetz liegen; die
+  Sprechtoken stehen in keiner Sicherung, keiner Seite und keinem Protokoll.
+* **Nebeneinander:** Zeile, MQTT und die LoxBerry-Meldung der Schreiber-Wache laufen unverändert
+  weiter; die Ansage kommt aus dem Abrufdienst. In Loxone ist dafür nichts anzulegen.
+* Einstellungen im Reiter Einstellungen, Testansage und Prüfzeile im Reiter Test.
+
 ## Neu in 0.9.38
 
 Hinweise zur Schreiber-Kennung (Energie-1, Entscheidung 25).

@@ -121,7 +121,8 @@ if ($modus === '--mqtt-leeren') {
 }
 
 /** Ein Durchlauf: holen, umrechnen, veroeffentlichen. */
-function ev_durchlauf($laut = false)
+/* Nr. 36 b: $ansage - Ansage bei Stoerung und Ladeende (cron und einmal; nicht im Modus test). */
+function ev_durchlauf($laut = false, $ansage = false)
 {
     $st = ev_state(true);
     /* Preisvorschau, Solarprognose und Statistik nachziehen.
@@ -149,6 +150,15 @@ function ev_durchlauf($laut = false)
     }
     $werte = ev_werte($st);
     $n = ev_mqtt_publish($werte);
+    /* Nr. 36 b (Stufe 2): die Ansage, ab Werk aus - NACH Zeile und MQTT, ohne Einfluss auf den
+     * Rueckgabewert. Ein Fehler darin haelt den Abruf nicht an. */
+    if ($ansage) {
+        try {
+            ev_ansage_takt($werte);
+        } catch (Throwable $ev_ae) {
+            ev_log_wenn_neu('ansage_fehler', 'Ansage: abgebrochen (' . get_class($ev_ae) . ').');
+        }
+    }
     if ($laut) {
         printf("Abruf: %s%s\n", $st['ok'] ? 'ok' : 'FEHLGESCHLAGEN',
             $st['fehler'] !== '' ? ' (' . $st['fehler'] . ')' : '');
@@ -179,7 +189,7 @@ if ($modus === 'test') {
 }
 
 if ($modus !== 'cron') {
-    exit(ev_durchlauf(false) ? 0 : 1);
+    exit(ev_durchlauf(false, true) ? 0 : 1);
 }
 
 /* ---- Cron-Betrieb ---- */
@@ -243,7 +253,7 @@ $ende = time() + 58;   // zwei Sekunden Luft bis zum naechsten Cron-Lauf
 
 do {
     $beginn = microtime(true);
-    ev_durchlauf(false);
+    ev_durchlauf(false, true);
     $rest = $takt - (microtime(true) - $beginn);
     if (time() + $takt > $ende) { break; }
     if ($rest > 0) { usleep((int) ($rest * 1000000)); }

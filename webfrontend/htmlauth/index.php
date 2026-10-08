@@ -243,6 +243,17 @@ if ($ev_post && isset($_POST['speichern'])) {
         $ev_cfg['wache_erlaubt'] = $ev_wer;
     }
 
+    /* Nr. 36 b (Stufe 2): die Ansage. Jede Beanstandung verhindert das Speichern (Nr. 16); kein
+     * Sprechtoken steht in einer Meldung, ein leeres Tokenfeld heisst "behalten". */
+    $ev_tmangel = array();
+    $ev_tbean = array();
+    $ev_tneu = ansage_formular_lesen($_POST, ev_tts($ev_cfg), $ev_tmangel, $ev_tbean,
+                                     array('modi' => ev_ansage_modi()), ev_ansage_k());
+    foreach ($ev_tmangel as $ev_tm) { $ev_fehler[] = ev_e($ev_tm['text']); }
+    foreach ($ev_tbean as $ev_tb) { $ev_bean[] = $ev_tb; }
+    if (!$ev_tmangel) { $ev_cfg['tts'] = $ev_tneu; }
+    foreach (ev_ansage_anlaesse() as $ev_ak) { $ev_cfg[$ev_ak] = isset($_POST[$ev_ak]) ? 1 : 0; }
+
     /* Abgewiesen: die Eingaben reisen zurueck ins Formular (X-2). */
     if ($ev_fehler) {
         $ev_eingaben = ev_eingaben_sammeln('speichern', $ev_bean);
@@ -449,6 +460,13 @@ if (class_exists('LBWeb', false)) {
    ausschliesslich der Behaelter begrenzt. */
 .sm-feld .ui-input-text, .sm-feld .ui-select, .sm-feld .ui-textinput { max-width: 520px; }
 .sm-feld .ui-input-text input, .sm-feld .ui-input-text textarea { font-size: 0.95em; }
+/* Nr. 36 b: Ein Auswahlfeld muss man als Auswahlfeld erkennen. Mit data-role="none" nimmt jQuery Mobile
+   den Pfeil weg (Hausform, wie Pumpenwacht). Die Raute im SVG steht als %23. */
+.sm-wrap select {
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='9' viewBox='0 0 14 9'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%234f7d17' stroke-width='2'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
+    padding-right: 32px; cursor: pointer; }
 .sm-hilfe { font-size: 0.85em; color: #555; margin: 4px 0 0; max-width: 640px; }
 .sm-step { border: 1px solid #ddd; border-left: 4px solid #6dac20; background: #fafafa;
     border-radius: 6px; padding: 12px 14px; margin: 12px 0; font-size: 0.92em; line-height: 1.5; }
@@ -728,6 +746,25 @@ if ($ev_link !== $ev_cfg['url']) { ?>
   <input data-role="none" type="text" id="wache_erlaubt" name="wache_erlaubt" value="<?= ev_e(ev_eingabe('speichern', 'wache_erlaubt', (string) $ev_cfg['wache_erlaubt'])) ?>"<?= ev_markierung('speichern', 'wache_erlaubt') ?> placeholder="loxone">
   <div class="sm-hilfe"><?= ev_t('EINST.H_WACHE_ERLAUBT') ?></div>
 </div>
+
+<?php /* Nr. 36 b (Stufe 2): Ansage ueber die gemeinsame Sprachausgabe, ab Werk aus. */ ?>
+<h2><?= ev_e(ev_t('DURCHSAGE.H')) ?></h2>
+<div class="sm-hinweis"><?= ev_e(ev_t('DURCHSAGE.TEXT_HILFE')) ?></div>
+<div class="sm-feld">
+  <label><?= ev_e(ev_t('DURCHSAGE.L_ANLAESSE')) ?></label>
+<?php foreach (ev_ansage_anlaesse() as $ev_ab => $ev_ak) { ?>
+  <label style="display:inline-flex;align-items:center;gap:8px;margin-right:14px;">
+    <input data-role="none" type="checkbox" name="<?= ev_e($ev_ak) ?>" value="1"<?= ev_markierung('speichern', $ev_ak) ?> <?= !empty(ev_eingabe('speichern', $ev_ak, $ev_cfg[$ev_ak])) ? 'checked' : '' ?>>
+    <?= ev_e(ev_t('DURCHSAGE.A_' . strtoupper($ev_ab))) ?>
+  </label>
+<?php } ?>
+  <div class="sm-hilfe"><?= ev_e(ev_t('DURCHSAGE.H_ANLAESSE')) ?></div>
+</div>
+<?= ansage_formular_html(ev_tts($ev_cfg), array(
+    'w' => function ($n, $g) { return ev_eingabe('speichern', $n, $g); },
+    'm' => function ($n) { return ev_markierung('speichern', $n); },
+    'c' => function ($n, $g) { return !empty(ev_eingabe('speichern', $n, $g)); },
+    'modi' => ev_ansage_modi()), ev_ansage_k()) ?>
 
 <h2><?= ev_e(ev_t('EINST.H_UPDATE')) ?></h2>
 <div class="sm-warnung"><?= ev_t('EINST.H_UPDATE_TEXT') ?></div>
@@ -1220,6 +1257,10 @@ list($ev_wtz, $ev_wtl) = ev_wache_lesen(); ?>
   <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="stop">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('TEST.K_STOP')) ?></button></form>
+<form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
+  <input data-role="none" type="hidden" name="testaktion" value="ansage">
+  <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('DURCHSAGE.K_TEST')) ?></button></form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
   <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="mqtt">

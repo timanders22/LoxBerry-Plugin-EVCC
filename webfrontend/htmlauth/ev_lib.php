@@ -36,6 +36,9 @@ date_default_timezone_set('Europe/Berlin');
 define('EV_LADEPUNKTE', 4);
 /** Anzahl der Fahrzeuge, fuer die Felder erzeugt werden. */
 define('EV_FAHRZEUGE', 4);
+/* Gemeinsame Sprachausgabe (Abschrift von Werkzeuge/gemeinsam/sprachausgabe.php, Nr. 36 b). Liegt
+ * neben dieser Datei; die Datei schuetzt sich selbst gegen doppeltes Laden. */
+require_once __DIR__ . '/sprachausgabe.php';
 
 /* ==================================================================
  * Pfade und Protokoll
@@ -424,6 +427,12 @@ function ev_vorgaben()
         'wache_lb_melden'   => 0,   // neue Runde zusaetzlich als LoxBerry-Meldung
         'wache_sperren_ein' => 0,   // fremde Schreiber mit 409 abweisen
         'wache_erlaubt'     => '',  // erlaubte Schreiber: Kennung, Adresse oder Kennung@Adresse
+        // Nr. 36 b (Stufe 2): Ansage ueber die gemeinsame Sprachausgabe - ab Werk keine Ausgabeart
+        // ('aus'); die Anlaesse sind an, wirken aber erst mit einer Ausgabeart.
+        'ansage_ausfall'     => 1,
+        'ansage_startfehler' => 1,
+        'ansage_fertig'      => 1,
+        'tts'               => ansage_vorgaben('aus'),
     );
 }
 
@@ -3460,7 +3469,7 @@ function ev_meldung_abholen()
 /** Die Felder je Formular (Wert des versteckten Feldes), mit ihrer Art. */
 function ev_eingabe_felder()
 {
-    return array(
+    $ev_l = array(
         'speichern' => array('url' => 'text', 'passwort' => 'geheim', 'passwort_loeschen' => 'haken',
                              'takt' => 'text', 'ladepunkte' => 'text', 'fahrzeuge' => 'text',
                              'tarife_ein' => 'haken', 'steuerung_ein' => 'haken', 'update_ein' => 'haken',
@@ -3469,6 +3478,9 @@ function ev_eingabe_felder()
                              'wache_sperren_ein' => 'haken', 'wache_erlaubt' => 'text'),
         'save_mqtt' => array('mqtt_ein' => 'haken', 'mqtt_topic' => 'text', 'mqtt_vollsend_min' => 'text'),
     );
+    /* Nr. 36 b: Felder und Anlaesse der Ansage; die Sprechtoken als 'geheim' (reisen nie mit). */
+    foreach (ev_ansage_x2() as $ev_n => $ev_a) { $ev_l['speichern'][$ev_n] = $ev_a; }
+    return $ev_l;
 }
 
 /** Die Eingaben eines abgewiesenen POST fuer die Einmalmeldung. */
@@ -4246,6 +4258,11 @@ function ev_wert_taugt($v)
  */
 function ev_wert_pruefen($schluessel, $wert)
 {
+    /* Nr. 36 b: der Block tts ist ein Feld; Ausgabeart, Adresse (Heimnetz) und Vorlage prueft das Modul. */
+    if ($schluessel === 'tts') {
+        $ev_tg = '';
+        return is_array($wert) && ansage_wert_pruefen($wert, $ev_tg, ev_ansage_modi()) !== null;
+    }
     /* NICHT getrimmt (C9, seit 0.9.34): ein Wert mit Leerzeichen am Rand wird
      * abgewiesen, nicht zurechtgebogen (Regeln/05, Ergaenzung 24.09.2026).
      * Bis 0.9.33 stand hier trim(), und eine Sicherung mit " http://... "
@@ -4286,6 +4303,9 @@ function ev_wert_pruefen($schluessel, $wert)
         case 'wache_ein':
         case 'wache_lb_melden':
         case 'wache_sperren_ein':
+        case 'ansage_ausfall':
+        case 'ansage_startfehler':
+        case 'ansage_fertig':
             return in_array($s, array('0', '1'), true);
         case 'wache_fenster_min':
             // Energie-1 C1: ganze Minuten 1..120, ohne Nachkommastellen.
@@ -4312,6 +4332,11 @@ function ev_wert_pruefen($schluessel, $wert)
  */
 function ev_sicherung_wert_mangel($k, $w)
 {
+    /* Nr. 36 b: der Block tts - welche gespeicherten Werte (nie die Werte selbst) brachten das Zurueckspielen zu Fall? */
+    if ($k === 'tts') {
+        $ev_tx = is_array($w) ? ansage_sicherung_x3($w, ev_ansage_modi()) : array('tts');
+        return $ev_tx ? sprintf(ev_t('EINST.SICH_WERT_UNZULAESSIG'), ev_e(implode(', ', $ev_tx))) : '';
+    }
     if (!ev_wert_taugt($w)) {
         return sprintf(ev_t('EINST.SICH_WERT_FORM'), ev_e((string) $k));
     }
@@ -4380,6 +4405,27 @@ function ev_sicherung_lesen($roh)
             $mangel[] = sprintf(ev_t('EINST.SICH_FREMD'), ev_e((string) $k));
             continue;
         }
+        if ($k === 'tts') {
+            /* Nr. 36 b (Stufe 2): eine Sicherung dieses Plugins traegt nie ein Sprechtoken - traegt die
+             * Datei eines, wird sie abgewiesen. Die geltenden Sprechtoken bleiben; Ausgabeart, Adresse und
+             * Vorlage werden wie im Formular geprueft (Heimnetz). */
+            $ev_tm = ansage_sicherung_mangel($w);
+            if ($ev_tm) {
+                $mangel[] = sprintf(ev_t('DURCHSAGE.SICH_TOKEN'), ev_e(implode(', ', $ev_tm)));
+                continue;
+            }
+            $ev_tg = '';
+            $ev_tp = ansage_wert_pruefen($w, $ev_tg, ev_ansage_modi());
+            if ($ev_tp === null) {
+                $mangel[] = sprintf(ev_t('DURCHSAGE.SICH_WERT'), ev_e(ansage_kennung_text($ev_tg, ev_ansage_k())));
+                continue;
+            }
+            $ev_tj = ev_tts(ev_config());
+            list($ev_tv) = ansage_vervollstaendigen($ev_tp + $ev_tj);
+            $neu['tts'] = ansage_sicherung_tokens_behalten($ev_tv, $ev_tj);
+            $anzahl++;
+            continue;
+        }
         /* Form, Rand und Regel prueft EINE Funktion - dieselbe, mit der
          * "Einstellungen sichern" vorher warnt (X-3). */
         $ev_wm = ev_sicherung_wert_mangel($k, $w);
@@ -4415,12 +4461,20 @@ function ev_sicherung_lesen($roh)
      * Hausstandard sagt: eine halb gueltige Datei aendert gar nichts. */
     $fehlend = array();
     $ev_behalten = array();
+    $ev_abehalten = array();
     $ev_jetzt_cfg = null;
     foreach (array_keys(ev_vorgaben()) as $fk) {
         if (!array_key_exists($fk, $daten)) {
             /* Energie-1 C1: eine Sicherung von vor der Schreiber-Wache kennt deren
              * Einstellungen nicht. Sie ist trotzdem vollstaendig; die geltenden Werte
              * der Wache bleiben, und die Seite sagt es (wie Marstek 1.1.19). */
+            /* Nr. 36 b: ebenso die Ansage (tts und die Anlaesse) aus einer Sicherung von vor 0.9.39. */
+            if (in_array($fk, ev_ansage_schluessel(), true)) {
+                if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
+                $neu[$fk] = $ev_jetzt_cfg[$fk];
+                $ev_abehalten[] = $fk;
+                continue;
+            }
             if (in_array($fk, ev_wache_schluessel(), true)) {
                 if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
                 $neu[$fk] = $ev_jetzt_cfg[$fk];
@@ -4436,6 +4490,9 @@ function ev_sicherung_lesen($roh)
     }
     if ($ev_behalten) {
         $hinweise[] = sprintf(ev_t('EINST.SICH_WACHE_BEHALTEN'), ev_e(implode(', ', $ev_behalten)));
+    }
+    if ($ev_abehalten) {
+        $hinweise[] = sprintf(ev_t('DURCHSAGE.SICH_BEHALTEN'), ev_e(implode(', ', $ev_abehalten)));
     }
     /* Energie-1 C1: Sperren an ohne erlaubten Schreiber - dieselbe Kreuzpruefung wie
      * das Formular. */
@@ -4457,7 +4514,8 @@ function ev_sicherung_bauen()
     $kopf = array(
         '_hinweis' => 'Sicherung des LoxBerry-Plugins EVCC. Enthaelt das '
                     . 'Aktionstoken dieser Anlage und gegebenenfalls das '
-                    . 'EVCC-Passwort - wie ein Passwort behandeln.',
+                    . 'EVCC-Passwort - wie ein Passwort behandeln. Die Sprechtoken der '
+                    . 'Sprachausgabe sind nie enthalten.',
         '_stand'   => date('Y-m-d H:i:s'),
     );
     /* X-3: Wuerde ein gespeicherter Wert das Zurueckspielen nicht bestehen,
@@ -4470,7 +4528,222 @@ function ev_sicherung_bauen()
                           . 'diese Werte unzulaessig sind: ' . implode(', ', $ev_alt)
                           . '. In der Oberflaeche berichtigen und neu sichern.';
     }
-    return $kopf + array_intersect_key($ev_cfg, ev_vorgaben());
+    $ev_aus = array_intersect_key($ev_cfg, ev_vorgaben());
+    /* Nr. 36 b: die Sprechtoken der Sprachausgabe gehen nie in eine Sicherung. */
+    if (isset($ev_aus['tts']) && is_array($ev_aus['tts'])) {
+        $ev_aus['tts'] = ansage_sicherung_bereinigen($ev_aus['tts']);
+    }
+    return $kopf + $ev_aus;
+}
+
+
+/* ================= Nr. 36 b (Stufe 2, seit 0.9.39): Ansage ueber die gemeinsame Sprachausgabe ==================
+ *
+ * Ab Werk aus (Ausgabeart 'aus'). Angesagt werden nur Ereignisse, die ein Mensch hoeren will - nie ein Wert
+ * im Takt:
+ *   ausfall      EVCC liefert seit 5 Minuten keine Daten (nur nachdem es in diesem Lauf schon einmal
+ *                geantwortet hat; nach einem Neustart des LoxBerry beginnt das neu), einmal je Ausfall;
+ *   startfehler  EVCC antwortet, meldet aber einen Startfehler (FEHLER_NR 5), einmal je Auftreten;
+ *   fertig       ein Ladepunkt hoert auf zu laden, das Fahrzeug steckt noch und hat seine Ladegrenze erreicht
+ *                (Fahrzeug-SoC >= Ladegrenze, beide bekannt). Ohne Fahrzeug-SoC keine Ansage: eine Pause im
+ *                PV-Modus sieht sonst genauso aus.
+ * Jeder Anlass ist einzeln abwaehlbar; hoechstens eine Ansage je Anlass (Ladeende: je Ladepunkt) in 30 min,
+ * eine gesperrte Ansage wird NICHT nachgeholt. Aus dem Abrufdienst, NACH Zeile und MQTT; die LoxBerry-Meldung
+ * der Schreiber-Wache laeuft unabhaengig davon weiter. Ins Protokoll kommt nur das Ergebnis, nie der Text
+ * (Nr. 18). Der Merker liegt im Zwischenspeicher (<tmp>/ansage.json) und wird nur bei einer Aenderung
+ * geschrieben.
+ */
+if (!defined('EV_ANSAGE_SPERRE_S')) { define('EV_ANSAGE_SPERRE_S', 1800); }
+if (!defined('EV_ANSAGE_AUSFALL_S')) { define('EV_ANSAGE_AUSFALL_S', 300); }
+
+/** Erlaubte Ausgabearten: alle des Moduls ausser 'audioserver' (kein Antwortweg zu Loxone im Abrufdienst). */
+function ev_ansage_modi()
+{
+    return array('aus', 'musicserver', 'ms4h', 'custom', 'alexang', 'cc4lox');
+}
+
+/** Die Anlaesse: Kennung => Konfigurationsschluessel. */
+function ev_ansage_anlaesse()
+{
+    return array('ausfall' => 'ansage_ausfall', 'startfehler' => 'ansage_startfehler', 'fertig' => 'ansage_fertig');
+}
+
+/** Alle Schluessel der Ansage in der Konfiguration (fuer die Sicherung von vor 0.9.39). */
+function ev_ansage_schluessel()
+{
+    return array_merge(array('tts'), array_values(ev_ansage_anlaesse()));
+}
+
+/** Der Block tts, vervollstaendigt (ab Werk 'aus'). */
+function ev_tts($cfg = null)
+{
+    $cfg = is_array($cfg) ? $cfg : ev_config();
+    list($t) = ansage_vervollstaendigen(isset($cfg['tts']) && is_array($cfg['tts']) ? $cfg['tts'] : array(), 'aus');
+    return $t;
+}
+
+/** Ist eine Ausgabeart gewaehlt? */
+function ev_ansage_an($cfg = null)
+{
+    $t = ev_tts($cfg);
+    return is_string($t['mode']) && $t['mode'] !== 'aus' && in_array($t['mode'], ev_ansage_modi(), true);
+}
+
+/** Der Kontext des Moduls: Webport, Kopfzeile, Datenordner, Texte. */
+function ev_ansage_k()
+{
+    $p = ev_paths();
+    return array(
+        'port'   => $p['home'] !== '' ? ansage_webport($p['home'] . '/config/system/general.json') : 80,
+        'kopf'   => array('User-Agent: LoxBerry EVCC'),
+        'ordner' => @is_dir($p['datadir']) ? $p['datadir'] : '',
+        't'      => function ($s) { return ev_t($s); },
+        /* Zu dieser Kennung hat das Modul (1.0.2) keinen Satz; linieneigen, bis der Modulschluessel
+         * mit Stufe 2 kommt (Entwurf, Stufe 2). */
+        'schluessel' => array('K_TTS_EINTRAG' => 'DURCHSAGE.SICH_EINTRAG'),
+    );
+}
+
+/** Die Felder der Ansage fuer X-2 (ev_eingabe_felder()): Sprechtoken als 'geheim' - sie reisen nie mit. */
+function ev_ansage_x2()
+{
+    $a = array();
+    foreach (ansage_feldnamen() as $id => $n) {
+        if (substr($id, -9) === '_loeschen') { $a[$n] = 'haken'; }
+        elseif (substr($id, -6) === '_token') { $a[$n] = 'geheim'; }
+        else { $a[$n] = 'text'; }
+    }
+    foreach (ev_ansage_anlaesse() as $k) { $a[$k] = 'haken'; }
+    return $a;
+}
+
+/** Ein Satz der Ansage aus der Sprachdatei, ohne Auszeichnung. */
+function ev_ansage_satz($schluessel, array $werte)
+{
+    return trim(html_entity_decode(strip_tags(vsprintf(ev_t($schluessel), $werte)), ENT_QUOTES, 'UTF-8'));
+}
+
+/**
+ * Aus dem Abrufdienst, nach Zeile und MQTT. $werte: ev_werte(). Rueckgabe array(versucht, gescheitert).
+ * Der Merker haelt: ob EVCC in diesem Lauf schon geantwortet hat, ob der laufende Ausfall angesagt ist, ob
+ * der Startfehler schon gemeldet ist, je Ladepunkt "laedt" und die Sperre je Anlass - nie Text oder Token.
+ */
+function ev_ansage_takt(array $werte, $jetzt = null)
+{
+    $jetzt = $jetzt === null ? time() : (int) $jetzt;
+    $cfg = ev_config(false);
+    $datei = ev_tmpdir() . '/ansage.json';
+    if (!ev_ansage_an($cfg)) {
+        /* Aus: nichts sagen, nichts merken - sonst kaeme beim Einschalten ein alter Zustand. */
+        if (is_file($datei)) { @unlink($datei); }
+        return array(0, 0);
+    }
+    $fh = @fopen(ev_tmpdir() . '/ansage.lock', 'ce');
+    if ($fh === false) { return array(0, 0); }
+    if (!@flock($fh, LOCK_EX | LOCK_NB)) { @fclose($fh); return array(0, 0); }
+    $n = 0;
+    $fehl = 0;
+    $roh = is_file($datei) ? (string) @file_get_contents($datei) : '';
+    $m = $roh === '' ? array() : json_decode($roh, true);
+    if (!is_array($m)) { $m = array(); }
+    $alt_js = json_encode($m);
+    $w = function ($name) use ($werte) { return isset($werte[$name]['wert']) ? $werte[$name]['wert'] : null; };
+    $ohne = function ($name) use ($werte) { return !isset($werte[$name]) || !empty($werte[$name]['ohne']); };
+    $ok = (int) $w('ok') === 1;
+    $faelle = array();     // array(Anlass, Sperrschluessel, Satz, Name im Protokoll)
+
+    /* Ausfall: erst wenn EVCC in diesem Lauf schon geantwortet hat (sonst ist es Einrichtung, kein Ausfall). */
+    if ($ok) {
+        $m['ok_gesehen'] = 1;
+        $m['ausfall_gesagt'] = 0;
+    } elseif (!empty($m['ok_gesehen']) && empty($m['ausfall_gesagt'])
+              && (int) $w('alter_s') >= EV_ANSAGE_AUSFALL_S && (int) $w('alter_s') < 99999) {
+        $m['ausfall_gesagt'] = 1;
+        $faelle[] = array('ausfall', 'ausfall',
+            ev_ansage_satz('DURCHSAGE.TEXT_AUSFALL', array((int) floor((int) $w('alter_s') / 60))), 'Ausfall');
+    }
+
+    /* Startfehler: nur aus einer Antwort von EVCC (FEHLER_NR 0, 4 oder 5) - ein Abruffehler dazwischen
+     * setzt den Merker nicht zurueck. */
+    $nr = (int) $w('fehler_nr');
+    if (in_array($nr, array(0, 4, 5), true)) {
+        $fatal = $nr === 5 ? 1 : 0;
+        if ($fatal && empty($m['fatal'])) {
+            $faelle[] = array('startfehler', 'startfehler', ev_ansage_satz('DURCHSAGE.TEXT_START', array()), 'Startfehler');
+        }
+        $m['fatal'] = $fatal;
+    }
+
+    /* Ladeende je Ladepunkt: laedt 1 -> 0, Fahrzeug steckt, SoC >= Ladegrenze (beide bekannt). */
+    $lp_alt = (isset($m['lp']) && is_array($m['lp'])) ? $m['lp'] : array();
+    $lp_neu = array();
+    for ($i = 1; $i <= EV_LADEPUNKTE; $i++) {
+        $pre = 'lp' . $i . '_';
+        $vor = isset($lp_alt[$i]) ? (int) $lp_alt[$i] : -1;
+        if (!$ok || $ohne($pre . 'laedt')) {
+            if ($ok) { continue; }                  // Ladepunkt nicht da: vergessen
+            if ($vor !== -1) { $lp_neu[$i] = $vor; } // kein frischer Stand: Merker behalten
+            continue;
+        }
+        $laedt = (int) $w($pre . 'laedt') === 1 ? 1 : 0;
+        $lp_neu[$i] = $laedt;
+        if ($vor === 1 && $laedt === 0 && (int) $w($pre . 'verbunden') === 1
+            && !$ohne($pre . 'fahrzeug_soc') && !$ohne($pre . 'limit_soc')) {
+            $soc = (float) $w($pre . 'fahrzeug_soc');
+            $lim = (float) $w($pre . 'limit_soc');
+            if ($soc > 0 && $lim > 0 && $soc >= $lim) {
+                $name = $ohne($pre . 'fahrzeug_name') ? '' : trim((string) $w($pre . 'fahrzeug_name'));
+                if ($name === '' || $name === '0') { $name = sprintf(ev_t('DURCHSAGE.LADEPUNKT'), $i); }
+                $faelle[] = array('fertig', 'fertig|lp' . $i,
+                    ev_ansage_satz('DURCHSAGE.TEXT_FERTIG', array($name, (int) round($soc))), 'Ladeende Ladepunkt ' . $i);
+            }
+        }
+    }
+    $m['lp'] = $lp_neu;
+
+    $anl = ev_ansage_anlaesse();
+    $sperre = (isset($m['sperre']) && is_array($m['sperre'])) ? $m['sperre'] : array();
+    $tts = null;
+    $k = null;
+    foreach ($faelle as $f) {
+        list($anlass, $schl, $satz, $wer) = $f;
+        if (empty($cfg[$anl[$anlass]])) { continue; }    // abgewaehlt
+        $zuletzt = isset($sperre[$schl]) ? (int) $sperre[$schl] : 0;
+        if ($zuletzt > 0 && ($jetzt - $zuletzt) < EV_ANSAGE_SPERRE_S && ($jetzt - $zuletzt) >= -300) {
+            ev_log('Ansage: ' . $wer . ' innerhalb von 30 min nach der letzten Ansage dieses Anlasses - '
+                   . 'nicht angesagt (Wiederholsperre).');
+            continue;
+        }
+        $sperre[$schl] = $jetzt;
+        if ($tts === null) { $tts = ev_tts($cfg); $k = ev_ansage_k(); }
+        $r = ansage_sprechen($satz, $tts, $k);
+        $n++;
+        if ($r['stand'] === 1) {
+            ev_log('Ansage: ' . $wer . ' angesagt (' . ansage_kurz($r) . ').');
+        } else {
+            $fehl++;
+            ev_log('Ansage: ' . $wer . ' nicht angesagt: ' . ansage_kennung_text($r['kennung'], $k)
+                   . '. Zeile, MQTT und LoxBerry-Meldung sind davon nicht betroffen; es wird nicht wiederholt.');
+        }
+    }
+    foreach ($sperre as $kk => $t) {
+        if (!is_string($kk) || ($jetzt - (int) $t) > 86400 || ($jetzt - (int) $t) < -86400) { unset($sperre[$kk]); }
+    }
+    $m['sperre'] = $sperre;
+    $neu_js = json_encode($m);
+    if ($neu_js !== false && $neu_js !== $alt_js && !ev_datei_schreiben($datei, $neu_js, 0600)) {
+        ev_log_wenn_neu('ansage_merker', 'WARNUNG: Der Merker fuer die Ansage liess sich nicht schreiben (' . $datei . ').');
+    }
+    @flock($fh, LOCK_UN);
+    @fclose($fh);
+    return array($n, $fehl);
+}
+
+/** Die Zeile im Reiter Test: 1 Haken, 0 Kreuz, -1 Hinweis (aus). Der Text ist maskiert (Modul). */
+function ev_pruefe_ansage($cfg = null)
+{
+    list($st, $text) = ansage_pruefzeile(ev_tts($cfg), true, ev_ansage_k());
+    return array($st === 1 ? 1 : ($st === -2 ? -1 : 0), $text);
 }
 
 

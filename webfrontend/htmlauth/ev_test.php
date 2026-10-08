@@ -593,6 +593,10 @@ function ev_pruefungen()
                 : sprintf(ev_t('TEST.A_REIHE_OK'), count($felder)));
     }
 
+    /* ---- Nr. 36 b: die Ansage (Ausgabeart, Erreichbarkeit, letzte Ansage) ---- */
+    list($ev_ast, $ev_atext) = ev_pruefe_ansage($cfg);
+    $z[] = ev_pruefzeile($ev_ast, ev_e(ev_t('DURCHSAGE.PRUEF')), $ev_atext);
+
     /* ---- Hat jede Einstellung eine Regel fuer das Zurueckspielen? ---- */
     $ev_ohne_regel = array();
     foreach (ev_vorgaben() as $ev_k => $ev_v) {
@@ -695,6 +699,19 @@ function ev_test_aktion($was)
                 }
             }
             return array(1, ev_t('TEST.M_DIENST_' . $ev_s));
+
+        case 'ansage':
+            /* Nr. 36 b: die Testansage. Ins Protokoll nur die Kurzform ohne Text und Token. */
+            $ev_ak = ev_ansage_k();
+            $ev_ar = ansage_testansage(ev_tts(ev_config()), $ev_ak);
+            ev_log('Testansage: ' . ansage_kurz($ev_ar));
+            if ($ev_ar['stand'] === 1) {
+                return array(1, ev_e(ev_t('DURCHSAGE.M_TEST_OK')));
+            }
+            if ($ev_ar['stand'] === -1) {
+                return array(1, sprintf(ev_e(ev_t('DURCHSAGE.M_TEST_NICHTS')), ev_e(ansage_kennung_text($ev_ar['kennung'], $ev_ak))));
+            }
+            return array(0, sprintf(ev_e(ev_t('DURCHSAGE.M_TEST_FEHL')), ev_e(ansage_kennung_text($ev_ar['kennung'], $ev_ak))));
 
         case 'abruf':
             $st = ev_state(true);
