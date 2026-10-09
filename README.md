@@ -9,6 +9,25 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.42
+
+Reiter „Einbindung in Loxone“ zeigt ein Bild der Bausteine aus dem gemeinsamen Musterprojekt und
+verlinkt die Projektdatei; die Baustein-Liste ist die dort in Loxone Config gebaute.
+
+* Unter der Baustein-Liste steht das Bild der Seite „EVCC“ aus dem
+  [LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt); das Bild liegt im Plugin,
+  nachgeladen wird nichts. Config kürzt lange Bausteinnamen, die vollen Namen stehen in der Tabelle.
+* **Baustein-Liste neu (13 statt 10 Zeilen):** eine Zeile = ein Baustein, nur die Hauptvariante,
+  so wie im Musterprojekt gebaut und verbunden. Neu als eigene Zeilen: Flankenerkennung „Ladung
+  beendet“ (#4) vor der Benachrichtigung „Ladung fertig“ (#5), Schwellwertschalter „EVCC stumm“ (#6),
+  „Ungleich“ auf `EVCC_FEHLER_NR` (#7), das ODER (#8) vor „EVCC Meldung“ (#9), „Kleiner oder gleich“
+  auf den Preisrang (#10) mit dem UND auf `EVCC_PREIS_OK` (#11) an `EVCC_SET_MODUS_LP1` (#12) und der
+  Schwellwertschalter „Solarprognose hoch“ (#13). Die Abfahrtszeit (Zeitschaltuhr oder Kalender auf
+  `EVCC_SET_PLANSOC_ZIEL_LP1` und `EVCC_SET_PLANSOC_STUNDEN_LP1`) steht jetzt als Hinweis unter der
+  Tabelle, ebenso, dass die Schwellen (Preisrang 6, Solarprognose 20/15) zur eigenen Anlage passen
+  müssen.
+* Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 0.9.41
 
 Baustein-Liste in der Schreibweise des Leitungswerkzeugs, gemeinsame Sprachausgabe 1.1.2.
@@ -929,6 +948,10 @@ Ladeleistung nur als *Statuseingang* in den Baustein zu geben.
    den Satz, der zu Ihrem Gateway passt.
 4. Im Reiter *Einbindung in Loxone* die Vorlage erzeugen und importieren.
 5. Im Reiter *Test* die Selbstprüfung ansehen.
+
+Die Bausteine der Baustein-Liste aus dem Reiter *Einbindung in Loxone* stehen fertig verbunden auf
+der Seite „EVCC“ im [LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt),
+einer gemeinsamen Projektdatei mit allen Plugin-Seiten und Vorlagen.
 
 ## Steuerung aus Loxone
 

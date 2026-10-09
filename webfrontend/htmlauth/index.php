@@ -529,6 +529,10 @@ if (class_exists('LBWeb', false)) {
    heissen durchgehend sm-warnung. Zwei Regeln, die niemand anwendet, mit
    einer Begruendung, die das Gegenteil behauptet, kosten bei der naechsten
    Durchsicht Zeit; deshalb sind sie fort. */
+/* Ergaenzung (Welle Bild, Entscheidung 45): Bild der Bausteine aus dem gemeinsamen Musterprojekt. */
+.sm-bild { margin: 12px 0; }
+.sm-bild img { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
+.sm-bild figcaption { font-size: .9em; color: #555; margin-top: 4px; }
 </style>
 
 <div class="sm-wrap">
@@ -1131,6 +1135,12 @@ foreach (ev_befehle() as $ev_a => $ev_b) {
          derselben Quelle wie die Vorlage (O8, ev_befehl_titel()). Bis 0.9.33
          standen die Namen fest auf Deutsch, in Umschrift, und #8/#9 nannten
          Ausgaenge ohne den seit 0.9.27 geltenden Vorsatz SET_. */ ?>
+<?php /* Welle Bild 4 (0.9.42, Entscheidung A): die Liste ist die im LoxBerry-Plugins
+         Musterprojekt in Loxone Config gebaute und mit leitungen_setzen.py verbundene
+         (Musterprojekt/baustein_listen.txt, Abschnitt EVCC) - eine Zeile = ein Baustein,
+         nur die Hauptvariante. Bausteinnamen in beiden Sprachen wie im Musterprojekt.
+         Der Name von #12 und die Befehle im Hinweis zur Abfahrtszeit kommen wie bisher
+         aus ev_befehl_titel(), derselben Quelle wie die Vorlage. */ ?>
 <tr><td>1</td><td><?= ev_t('BAUSTEIN.B1_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B1_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B1_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B1_VERB') ?></td></tr>
 <tr><td>2</td><td><?= ev_t('BAUSTEIN.B2_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B2_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B2_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B2_VERB') ?></td></tr>
 <tr><td>3</td><td><?= ev_t('BAUSTEIN.B3_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B3_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B3_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B3_VERB') ?></td></tr>
@@ -1138,11 +1148,21 @@ foreach (ev_befehle() as $ev_a => $ev_b) {
 <tr><td>5</td><td><?= ev_t('BAUSTEIN.B5_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B5_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B5_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B5_VERB') ?></td></tr>
 <tr><td>6</td><td><?= ev_t('BAUSTEIN.B6_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B6_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B6_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B6_VERB') ?></td></tr>
 <tr><td>7</td><td><?= ev_t('BAUSTEIN.B7_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B7_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B7_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B7_VERB') ?></td></tr>
-<tr><td>8</td><td><?= ev_t('BAUSTEIN.B8_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B8_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B8_PARAM') ?></td><td><?= sprintf(ev_t('BAUSTEIN.B8_VERB'), ev_e(ev_befehl_titel('modus', 1))) ?></td></tr>
-<tr><td>9</td><td><?= ev_t('BAUSTEIN.B9_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B9_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B9_PARAM') ?></td><td><?= sprintf(ev_t('BAUSTEIN.B9_VERB'), ev_e(ev_befehl_titel('plansoc_ziel', 1)), ev_e(ev_befehl_titel('plansoc_stunden', 1))) ?></td></tr>
+<tr><td>8</td><td><?= ev_t('BAUSTEIN.B8_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B8_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B8_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B8_VERB') ?></td></tr>
+<tr><td>9</td><td><?= ev_t('BAUSTEIN.B9_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B9_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B9_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B9_VERB') ?></td></tr>
 <tr><td>10</td><td><?= ev_t('BAUSTEIN.B10_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B10_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B10_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B10_VERB') ?></td></tr>
+<tr><td>11</td><td><?= ev_t('BAUSTEIN.B11_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B11_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B11_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B11_VERB') ?></td></tr>
+<tr><td>12</td><td><?= ev_t('BAUSTEIN.B12_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_befehl_titel('modus', 1)) ?></span></td><td><?= ev_t('BAUSTEIN.B12_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B12_VERB') ?></td></tr>
+<tr><td>13</td><td><?= ev_t('BAUSTEIN.B13_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B13_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B13_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B13_VERB') ?></td></tr>
 </table>
-<?= ev_t('LOX.S4_ERLAEUTERUNG') ?>
+<?= ev_t('LOX.S4_ERLAEUTERUNG') ?><br>
+<?= sprintf(ev_t('LOX.S4_ABFAHRT'), ev_e(ev_befehl_titel('plansoc_ziel', 1)), ev_e(ev_befehl_titel('plansoc_stunden', 1))) ?><br>
+<?= ev_t('LOX.S4_SCHWELLEN') ?>
+<figure class="sm-bild">
+<img src="einbindung_loxone.png" alt="<?= ev_e(ev_t('LOX.BILD_ALT')) ?>" loading="lazy">
+<figcaption><?= ev_e(ev_t('LOX.BILD_UNTERSCHRIFT')) ?></figcaption>
+</figure>
+<p class="sm-hilfe"><?= ev_t('LOX.MUSTERPROJEKT') ?></p>
 </div>
 
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S_GEGENPROBE_T')) ?></b><br>
