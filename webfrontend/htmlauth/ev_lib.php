@@ -4598,9 +4598,8 @@ function ev_ansage_k()
         'kopf'   => array('User-Agent: LoxBerry EVCC'),
         'ordner' => @is_dir($p['datadir']) ? $p['datadir'] : '',
         't'      => function ($s) { return ev_t($s); },
-        /* Zu dieser Kennung hat das Modul (1.0.2) keinen Satz; linieneigen, bis der Modulschluessel
-         * mit Stufe 2 kommt (Entwurf, Stufe 2). */
-        'schluessel' => array('K_TTS_EINTRAG' => 'DURCHSAGE.SICH_EINTRAG'),
+        /* K_TTS_EINTRAG: den Satz bringt das Modul seit 1.1.2 selbst mit; die Umlenkung auf
+         * DURCHSAGE.SICH_EINTRAG ist seit 0.9.41 gestrichen (X-10). Ab Werk aus - kein 'werk'. */
     );
 }
 
