@@ -9,6 +9,42 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.43
+
+Vollausstattung aus dem [LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt): Der Reiter „Einbindung in
+Loxone“ zeigt in Schritt 4 vier Baustein-Listen – „Energiefluss, Tarif und Meldungen“ (43 Zeilen),
+„Ladepunkt 1“ (32), „Steuerung Ladepunkt 1“ (27) und „Hausspeicher und Tarif“ (33) –, je mit Bild und
+Schritt-für-Schritt-Anleitung (zusammen 135 statt 13 Zeilen, vier Bilder).
+
+* **Liste berichtigt:** `EVCC_SET_MODUS_LP1` (#12) hängt an den Radiotasten „Lademodus Ladepunkt 1“
+  (#35) statt an „Günstig und Preis gültig“ (#11) – mit der Liste von 0.9.42 stand der Lademodus in
+  jeder nicht günstigen Stunde auf AUS. „EVCC Meldung“ (#9) meldet erst, wenn eine Störung 120 s
+  anhält (#25), „Ladung fertig“ (#5) nur, wenn das Ladeziel erreicht ist (#34), nicht bei jeder
+  PV-Pause. Wer die Seite nach 0.9.42 gebaut hat, löscht die Leitungen #4 (Off) → #5, #8 → #9 und
+  #11 → #12 und verbindet wie in der Liste.
+* **`<v.3>` für Preisgrenzen und Energieziel:** Die Vorlage der virtuellen Ausgänge sendet
+  `EVCC_SET_SMARTCOSTLIMIT_LP1/_LP2`, `EVCC_SET_LIMITENERGIE_LP1/_LP2` und `EVCC_SET_NETZLADEGRENZE`
+  mit `wert=<v.3>` statt `<v.0>` – bis 0.9.42 wurde aus 0,25 je kWh eine glatte 0. Wer die Vorlage
+  schon eingelesen hat, ändert bei diesen Befehlen `<v.0>` von Hand auf `<v.3>` (ein zweiter Import
+  legte alles doppelt an).
+* **Fahrzeugwahl je Fahrzeug:** Statt des allgemeinen `EVCC_SET_FAHRZEUG_LP1/_LP2`, der beim
+  Einschalten „1“ als Fahrzeugnamen sandte, enthält die Vorlage je Fahrzeug, das EVCC beim letzten
+  Abruf gemeldet hat, einen Digitalbefehl mit festem Namen: `EVCC_SET_FAHRZEUG_<N>_LP1` (N in der
+  Reihenfolge der Fahrzeuge wie bei `EVCC_FZ<N>_…`, Kommentar = Fahrzeugname). Ohne gelungenen Abruf
+  fehlen diese Befehle; ein Name außerhalb von Buchstaben, Ziffern, `_`, `.`, `-` und Leerzeichen
+  bekommt keinen.
+* **Befehlsbremse reicht nach (Verhaltensänderung):** Ein Wert, den die Bremse mit HTTP 429 abweist
+  (anderer Wert innerhalb von 10 s), war bis 0.9.42 verloren – in EVCC blieb der vorletzte Wert stehen,
+  in der App der letzte. Jetzt merkt sich der Endpunkt den abgewiesenen Wert (Antwort
+  `;NACHREICHEN=1`), und der Abrufdienst sendet ihn nach Ablauf der 10 s mit dem nächsten Abruf – je
+  Befehl und Ladepunkt nur den letzten. Ein später durchgegangener oder gleicher Wert streicht ihn,
+  nach 300 s verfällt er, der Trockenlauf merkt sich nichts. `bin/ev_abruf.php --selbsttest` rechnet
+  Bremse, Nachreichen, `<v.3>` und Fahrzeugwahl an 18 Fällen durch.
+* **Vorlagentitel fest deutsch:** Die Ausgangsvorlage heißt in beiden Sprachen „EVCC Befehle“ (bisher
+  in einer englischen Oberfläche „EVCC commands“), wie im Musterprojekt und in der Liste; die
+  Kommentare bleiben übersetzt.
+* Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 0.9.42
 
 Reiter „Einbindung in Loxone“ zeigt ein Bild der Bausteine aus dem gemeinsamen Musterprojekt und
@@ -949,8 +985,9 @@ Ladeleistung nur als *Statuseingang* in den Baustein zu geben.
 4. Im Reiter *Einbindung in Loxone* die Vorlage erzeugen und importieren.
 5. Im Reiter *Test* die Selbstprüfung ansehen.
 
-Die Bausteine der Baustein-Liste aus dem Reiter *Einbindung in Loxone* stehen fertig verbunden auf
-der Seite „EVCC“ im [LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt),
+Die Bausteine der vier Baustein-Listen aus dem Reiter *Einbindung in Loxone* stehen fertig verbunden auf
+den Seiten „EVCC“, „EVCC Ladepunkt 1“, „EVCC Steuerung“ und „EVCC Hausspeicher und Tarif“ im
+[LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt),
 einer gemeinsamen Projektdatei mit allen Plugin-Seiten und Vorlagen.
 
 ## Steuerung aus Loxone
@@ -972,6 +1009,12 @@ halber Ladeplan antwortet deshalb mit `GEMERKT=0`). Nur `probe=1` gilt; ein
 anderer Wert und `probe=1` an einer lesenden Aktion werden mit HTTP 400
 abgewiesen. Beispiel:
 `/plugins/<ordner>/index.php?token=<TOKEN>&aktion=modus&lp=1&wert=pv&probe=1`
+
+**Befehlsbremse:** Derselbe Wert geht innerhalb von 60 s nicht noch einmal an EVCC (Antwort
+`UNVERAENDERT=1`), ein anderer Wert frühestens nach 10 s (HTTP 429, `GRUND=BREMSE`). Seit 0.9.43 merkt
+sich das Plugin einen so abgewiesenen Wert (`;NACHREICHEN=1`) und reicht ihn nach Ablauf der 10 s mit
+dem nächsten Abruf selbst nach – je Befehl und Ladepunkt nur den letzten; ein später durchgegangener
+oder gleicher Wert streicht ihn, nach 300 s verfällt er. Das Protokoll nennt jedes Nachreichen.
 
 **Schreiber-Wache:** Jeder schaltende Befehl darf `&von=<kennung>` tragen
 (1 bis 32 Zeichen aus Buchstaben, Ziffern, `_` und `-`); die Loxone-Vorlage setzt
@@ -1025,7 +1068,8 @@ nötig.
   steuert. Ein Speicher, den Loxone oder ein anderes Plugin führt, ist davon nicht
   erfasst.
 * Die Befehlsbremse lässt einen geänderten Wert höchstens alle 10 Sekunden durch
-  (sonst HTTP 429). Loxone sendet die Residualleistung deshalb gestuft (etwa auf
+  (sonst HTTP 429; den zuletzt abgewiesenen reicht das Plugin seit 0.9.43 nach Ablauf
+  selbst nach). Loxone sendet die Residualleistung trotzdem gestuft (etwa auf
   100 W gerundet) und nur bei Änderung.
 * Ob EVCC so regelt, wie es soll, zeigt die EVCC-Oberfläche (Reserve und
   Ladeleistung am Ladepunkt).

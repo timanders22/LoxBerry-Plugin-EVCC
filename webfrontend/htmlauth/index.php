@@ -533,6 +533,11 @@ if (class_exists('LBWeb', false)) {
 .sm-bild { margin: 12px 0; }
 .sm-bild img { max-width: 100%; height: auto; border: 1px solid #ccc; border-radius: 4px; background: #fff; }
 .sm-bild figcaption { font-size: .9em; color: #555; margin-top: 4px; }
+/* Welle Bild 12 VOLL (0.9.43): Abschnitte, Schritte und Hinweise je Baustein-Liste. */
+.sm-wrap h4.sm-h4 { color: #4f7d17; font-size: 0.98em; font-weight: 700; margin: 22px 0 4px;
+    padding-top: 10px; border-top: 1px solid #e0e0e0; }
+.sm-schritte { margin: 6px 0 0 18px; padding: 0; }
+.sm-schritte li { margin: 3px 0; }
 </style>
 
 <div class="sm-wrap">
@@ -1008,8 +1013,11 @@ foreach (ev_befehle() as $ev_a => $ev_b) {
     elseif ($ev_b['pruef'] === 'schalter')  { $ev_adr .= '&amp;wert=1|0'; }
     elseif ($ev_b['pruef'] === 'plan')      { $ev_adr .= '&amp;wert=&lt;ziel&gt;&amp;stunden=&lt;vorlauf&gt;'; }
     elseif ($ev_b['pruef'] === 'planziel' || $ev_b['pruef'] === 'planstunden') { $ev_adr .= '&amp;wert=&lt;v&gt;'; }
-    else                                    { $ev_adr .= '&amp;wert=&lt;v.0&gt;'; }
+    // Seit 0.9.43: Fahrzeugwahl je Fahrzeug mit festem Namen, Analogwerte aus ev_vorlage_platzhalter().
+    elseif ($ev_b['pruef'] === 'name')      { $ev_adr .= '&amp;wert=&lt;' . ev_e(ev_t('LOX.FAHRZEUG_PLATZ')) . '&gt;'; }
+    else                                    { $ev_adr .= '&amp;wert=' . ev_e(ev_vorlage_platzhalter($ev_b)); }
     $ev_bed = ev_t($ev_b['text']);
+    if ($ev_b['pruef'] === 'name') { $ev_bed .= ' ' . sprintf(ev_t('LOX.FAHRZEUG_JE'), ev_e(ev_befehl_titel($ev_a, 1, 1))); }
     // Ein Befehl, der nicht in die Vorlage geht, sagt warum (C11).
     if (isset($ev_b['vorlage']) && empty($ev_b['vorlage'])) { $ev_bed .= ' ' . ev_t('LOX.NICHT_IN_VORLAGE'); }
     if ($ev_a === 'modus')        { $ev_bed .= ' (0=off, 1=now, 2=minpv, 3=pv)'; }
@@ -1129,40 +1137,292 @@ foreach (ev_befehle() as $ev_a => $ev_b) {
 
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S4_T')) ?></b><br>
 <?= ev_t('LOX.S4') ?>
+<?php
+/* Welle Bild 12 VOLL (0.9.43, Hausherr 11.10.2026: Vollausstattung, ein absoluter Laie soll das
+ * Maximum leicht uebernehmen koennen): vier Seiten aus dem LoxBerry-Plugins Musterprojekt, dort in
+ * Loxone Config gebaut und mit leitungen_setzen.py verbunden (Musterprojekt/baustein_listen.txt,
+ * Abschnitte "EVCC" 43, "EVCC Ladepunkt 1" 32, "EVCC Steuerung" 27, "EVCC Hausspeicher und
+ * Tarif" 33 Zeilen). Je Seite: Ueberschrift, Kasten "So uebernehmen Sie diese Seite", Tabelle,
+ * Hinweise, Bild, Link - alle immer sichtbar. Bis 0.9.42 stand hier eine Seite mit 13 Zeilen.
+ * Die Namen der Eingaenge kommen aus ev_feld_titel(), die der Befehle aus ev_befehl_titel() -
+ * denselben Stellen wie die Vorlagen (O8); die Vorlagentitel aus ev_vorlage_titel_ein()/_aus().
+ * Die Virtuellen Texteingaenge legt keine Vorlage an (Regeln/07); ihr Name ist der Gateway-Name
+ * aus dem eingestellten MQTT-Praefix. Texte aus [BAUSTEIN]; jede Zelle ist fertiges, maskiertes
+ * HTML. Zeile: array(Nr, Typ, Name, Parameter, Eingaenge). */
+/* Erst vsprintf auf den Sprachtext, dann maskieren: eingesetzte Namen kommen nie roh heraus. */
+$ev_bs_k = function ($schluessel, $argumente = array()) {
+    $s = (string) ev_t('BAUSTEIN.' . $schluessel);
+    return ev_e($argumente ? vsprintf($s, $argumente) : $s);
+};
+$ev_bs_m = '&mdash;';
+$ev_bs_mono = function ($s) { return '<span class="sm-mono">' . ev_e($s) . '</span>'; };
+$ev_bs_vi_t = ev_vorlage_titel_ein();
+$ev_bs_vo_t = ev_vorlage_titel_aus();
+/* Gateway-Name eines MQTT-Themas: Praefix/Thema, Schraegstrich und Prozent werden zu _ (Regeln/07). */
+$ev_bs_gw = function ($thema) use ($ev_cfg) {
+    return str_replace(array('/', '%'), '_', ev_mqtt_thema($ev_cfg['mqtt_topic'] . '/' . $thema));
+};
+$ev_bs_ein = function ($nr) use ($ev_bs_k) { return $ev_bs_k('E_EIN', array($nr)); };
+$ev_bs_aus = function ($pin, $nr) use ($ev_bs_k) { return $ev_bs_k('E_AUSGANG', array($pin, $nr)); };
+$ev_bs_par = function ($param) use ($ev_bs_k, $ev_bs_m) { return $param === '' ? $ev_bs_m : $ev_bs_k($param); };
+/* Der Virtuelle HTTP-Eingang selbst (Vorlage "EVCC"). */
+$ev_bs_vi_kopf = function ($nr, $param) use ($ev_bs_k, $ev_bs_mono, $ev_bs_par, $ev_bs_vi_t, $ev_bs_m) {
+    return array($nr, $ev_bs_k('TYP_VI', array($ev_bs_vi_t)), $ev_bs_mono($ev_bs_vi_t), $ev_bs_par($param), $ev_bs_m);
+};
+/* Eingang aus der Vorlage "EVCC": Name aus ev_feld_titel(). */
+$ev_bs_vi_z = function ($nr, $feld, $param) use ($ev_bs_k, $ev_bs_mono, $ev_bs_par, $ev_bs_vi_t, $ev_bs_m) {
+    return array($nr, $ev_bs_k('TYP_VIB', array($ev_bs_vi_t)), $ev_bs_mono(ev_feld_titel($feld)),
+                 $ev_bs_par($param), $ev_bs_m);
+};
+/* Befehl aus der Vorlage "EVCC Befehle": Name aus ev_befehl_titel(). */
+$ev_bs_vo_z = function ($nr, $typ, $aktion, $lp, $param, $verb) use ($ev_bs_k, $ev_bs_mono, $ev_bs_par, $ev_bs_vo_t) {
+    return array($nr, $ev_bs_k($typ, array($ev_bs_vo_t)), $ev_bs_mono(ev_befehl_titel($aktion, $lp)),
+                 $ev_bs_par($param), $verb);
+};
+/* Virtueller Texteingang: Name = Gateway-Name des Themas. */
+$ev_bs_tx_z = function ($nr, $thema, $param) use ($ev_bs_k, $ev_bs_mono, $ev_bs_par, $ev_bs_gw, $ev_bs_m) {
+    return array($nr, $ev_bs_k('T_TEXTEIN'), $ev_bs_mono($ev_bs_gw($thema)), $ev_bs_par($param), $ev_bs_m);
+};
+/* Uebriger Baustein: Typ-Schluessel, Name <S>_NAME, Parameter <S>_PARAM. */
+$ev_bs_zl = function ($nr, $typ, $s, $param, $verb) use ($ev_bs_k, $ev_bs_par) {
+    return array($nr, $ev_bs_k($typ), $ev_bs_k($s . '_NAME'), $ev_bs_par($param), $verb);
+};
+$ev_bs_seiten = array(
+    array('kopf' => 'BL_EVCC', 'seite' => 'EVCC', 'bild' => 'einbindung_loxone.png', 'zeilen' => array(
+        $ev_bs_vi_kopf(1, 'S1_01_PARAM'),
+        $ev_bs_zl(2, 'T_EM', 'S1_02', 'S1_02_PARAM', 'Gpwr = EVCC_NETZ_KW, Ppwr = EVCC_PV_KW, Spwr = EVCC_SPEICHER_KW, Soc = EVCC_SPEICHER_SOC, IL1 = EVCC_LP1_LEISTUNG_KW'),
+        $ev_bs_zl(3, 'T_STATUS', 'S1_03', 'S1_03_PARAM', 'V1 = EVCC_LP1_LAEDT, V2 = EVCC_LP1_LEISTUNG_KW, V3 = EVCC_LP1_FAHRZEUG_SOC, V4 = #28, V5 = #29, V6 = #31, V7 = #32, V8 = #33'),
+        $ev_bs_zl(4, 'T_FLANKE', 'S1_04', 'S1_04_PARAM', $ev_bs_k('E_EIN_NAME', array('EVCC_LP1_LAEDT'))),
+        $ev_bs_zl(5, 'T_BENACHR', 'S1_05', 'S1_05_PARAM', $ev_bs_ein(34)),
+        $ev_bs_zl(6, 'T_SCHWELLE', 'S1_06', 'S1_06_PARAM', $ev_bs_k('E_EIN_NAME', array('EVCC_ALTER_S'))),
+        $ev_bs_zl(7, 'T_UNGLEICH', 'S1_07', 'S1_07_PARAM', 'I1 = EVCC_FEHLER_NR'),
+        $ev_bs_zl(8, 'T_ODER', 'S1_08', '', 'I1 = #7, I2 = #6'),
+        $ev_bs_zl(9, 'T_BENACHR', 'S1_09', 'S1_09_PARAM', $ev_bs_ein(25)),
+        $ev_bs_zl(10, 'T_KLEINERGLEICH', 'S1_10', 'S1_10_PARAM', 'I1 = EVCC_PREIS_RANG'),
+        $ev_bs_zl(11, 'T_UND', 'S1_11', '', 'I1 = #10, I2 = EVCC_PREIS_OK'),
+        $ev_bs_vo_z(12, 'TYP_VO', 'modus', 1, 'S1_12_PARAM', $ev_bs_ein(35)),
+        $ev_bs_zl(13, 'T_SCHWELLE', 'S1_13', 'S1_13_PARAM', $ev_bs_k('E_EIN_NAME', array('EVCC_PROGNOSE_MORGEN'))),
+        $ev_bs_vi_z(14, 'haus_kw', 'S1_14_PARAM'),
+        $ev_bs_vi_z(15, 'gruen_haus', 'S1_15_PARAM'),
+        $ev_bs_zl(16, 'T_STATUS', 'S1_16', 'S1_16_PARAM', 'V1 = EVCC_PV_KW, V2 = #14, V3 = EVCC_NETZ_KW, V4 = EVCC_SPEICHER_KW, V5 = EVCC_SPEICHER_SOC, V6 = #15'),
+        $ev_bs_vi_z(17, 'ok', 'S1_17_PARAM'),
+        $ev_bs_vi_z(18, 'betriebsbereit', 'S1_18_PARAM'),
+        $ev_bs_vi_z(19, 'dienst', 'S1_19_PARAM'),
+        $ev_bs_zl(20, 'T_KONSTANTE', 'S1_20', 'S1_20_PARAM', $ev_bs_m),
+        $ev_bs_zl(21, 'T_VALID', 'S1_21', 'S1_21_PARAM', 'V = EVCC_ALTER_S, En = #20'),
+        $ev_bs_zl(22, 'T_NICHT', 'S1_22', '', 'I = #18'),
+        $ev_bs_zl(23, 'T_ODER', 'S1_23', '', 'I1 = ' . $ev_bs_aus('E', 21) . ', I2 = #22'),
+        $ev_bs_zl(24, 'T_ODER', 'S1_24', 'S1_24_PARAM', 'I1 = #8, I2 = #23'),
+        $ev_bs_zl(25, 'T_EVZ', 'S1_25', 'S1_25_PARAM', $ev_bs_ein(24)),
+        $ev_bs_tx_z(26, 'letzter_fehler', 'S1_26_PARAM'),
+        $ev_bs_zl(27, 'T_STATUS', 'S1_27', 'S1_27_PARAM', 'V1 = ' . $ev_bs_aus('E', 21) . ', V2 = #19, V3 = EVCC_FEHLER_NR, V4 = #26, V5 = #17, V6 = EVCC_ALTER_S'),
+        $ev_bs_vi_z(28, 'lp1_verbunden', 'S1_28_PARAM'),
+        $ev_bs_vi_z(29, 'lp1_modus_nr', 'S1_29_PARAM'),
+        $ev_bs_vi_z(30, 'lp1_limit_soc', 'S1_30_PARAM'),
+        $ev_bs_vi_z(31, 'lp1_pv_warten_min', 'S1_31_PARAM'),
+        $ev_bs_vi_z(32, 'lp1_phasen_warten_min', 'S1_32_PARAM'),
+        $ev_bs_zl(33, 'T_GROESSERGLEICH', 'S1_33', 'S1_33_PARAM', 'V1 = EVCC_LP1_FAHRZEUG_SOC, V2 = #30'),
+        $ev_bs_zl(34, 'T_UND', 'S1_34', 'S1_34_PARAM', 'I1 = ' . $ev_bs_aus('Off', 4) . ', I2 = #33'),
+        $ev_bs_zl(35, 'T_RADIO', 'S1_35', 'S1_35_PARAM', $ev_bs_m),
+        $ev_bs_vi_z(36, 'tarif_netz', 'S1_36_PARAM'),
+        $ev_bs_vi_z(37, 'preis_stunden', 'S1_37_PARAM'),
+        $ev_bs_vi_z(38, 'preis_guenstigste_stunde', 'S1_38_PARAM'),
+        $ev_bs_vi_z(39, 'lp1_smartcost_aktiv', 'S1_39_PARAM'),
+        $ev_bs_zl(40, 'T_STATUS', 'S1_40', 'S1_40_PARAM', 'V1 = #36, V2 = EVCC_PREIS_RANG, V3 = #37, V4 = #11, V5 = EVCC_PREIS_OK, V6 = #38, V7 = #39'),
+        $ev_bs_vi_z(41, 'prognose_heute', 'S1_41_PARAM'),
+        $ev_bs_vi_z(42, 'prognose_uebermorgen', 'S1_42_PARAM'),
+        $ev_bs_zl(43, 'T_STATUS', 'S1_43', 'S1_43_PARAM', 'V1 = #13, V2 = #41, V3 = EVCC_PROGNOSE_MORGEN, V4 = #42'),
+        ),
+        'schritte' => array(
+            array('S1_SCHRITT1', array()),
+            array('S1_SCHRITT2', array(ev_t('REITER.EINSTELLUNGEN'), ev_t('EINST.L_URL'), ev_t('EINST.L_LADEPUNKTE'), ev_t('EINST.L_FAHRZEUGE'), ev_t('EINST.L_TARIFE'), ev_t('EINST.L_STEUERUNG'))),
+            array('S1_SCHRITT3', array(ev_t('REITER.MQTT'), ev_t('EINST.L_MQTT_EIN'), $ev_cfg['mqtt_topic'], $ev_cfg['mqtt_topic'])),
+            array('S1_SCHRITT4', array(ev_t('LOX.K_VORLAGE_EIN'), ev_t('LOX.K_VORLAGE_AUS'))),
+            array('S1_SCHRITT5', array()),
+            array('S1_SCHRITT6', array($ev_bs_vi_t, $ev_bs_vo_t, ev_befehl_titel('modus', 1))),
+            array('S1_SCHRITT7', array($ev_bs_gw('letzter_fehler'))),
+            array('S1_SCHRITT8', array()),
+            array('S1_SCHRITT9', array(ev_t('LOX.T_VERBINDEN'))),
+            array('S1_SCHRITT10', array(ev_t('LOX.T_PARAMETER'))),
+            array('S1_SCHRITT11', array()),
+            array('S1_SCHRITT12', array(ev_feld_titel('lp1_leistung_kw'))),
+            array('S1_SCHRITT13', array(ev_t('REITER.TEST'))),
+        ),
+        'hinweise' => array(
+            array('S1_H1', array()),
+            array('S1_H2', array()),
+            array('S1_H3', array()),
+            array('S1_H4', array(ev_feld_titel('dienst'))),
+            array('S1_H5', array(ev_t('TEST.K_TOKEN'), ev_t('REITER.TEST'))),
+            array('S1_H6', array()),
+            array('S1_H7', array(ev_befehl_titel('modus', 1))),
+        )),
+    array('kopf' => 'BL_LP1', 'seite' => 'EVCC Ladepunkt 1', 'bild' => 'einbindung_loxone_ladepunkt_1.png', 'zeilen' => array(
+        $ev_bs_vi_z(1, 'lp1_geladen_kwh', 'S2_01_PARAM'),
+        $ev_bs_vi_z(2, 'lp1_ladedauer_min', 'S2_02_PARAM'),
+        $ev_bs_vi_z(3, 'lp1_solaranteil', 'S2_03_PARAM'),
+        $ev_bs_vi_z(4, 'lp1_sitzung_preis', 'S2_04_PARAM'),
+        $ev_bs_vi_z(5, 'lp1_sitzung_preis_kwh', 'S2_05_PARAM'),
+        $ev_bs_vi_z(6, 'lp1_sitzung_co2', 'S2_06_PARAM'),
+        $ev_bs_vi_z(7, 'lp1_rest_kwh', 'S2_07_PARAM'),
+        $ev_bs_vi_z(8, 'lp1_restzeit_min', 'S2_08_PARAM'),
+        $ev_bs_zl(9, 'T_STATUS', 'S2_09', 'S2_09_PARAM', 'V1 = #1, V2 = #2, V3 = #3, V4 = #4, V5 = #5, V6 = #6, V7 = #7, V8 = #8'),
+        $ev_bs_vi_z(10, 'lp1_gesamt_kwh', 'S2_10_PARAM'),
+        $ev_bs_vi_z(11, 'lp1_phasen', 'S2_11_PARAM'),
+        $ev_bs_vi_z(12, 'lp1_strom_a', 'S2_12_PARAM'),
+        $ev_bs_vi_z(13, 'lp1_freigegeben', 'S2_13_PARAM'),
+        $ev_bs_vi_z(14, 'lp1_fahrzeug_km', 'S2_14_PARAM'),
+        $ev_bs_tx_z(15, 'lp1_fahrzeug_name', 'S2_15_PARAM'),
+        $ev_bs_zl(16, 'T_STATUS', 'S2_16', 'S2_16_PARAM', 'V1 = #11, V2 = #12, V3 = #13, V4 = #14, V5 = #15, V6 = #10'),
+        $ev_bs_vi_z(17, 'lp1_min_soc', 'S2_17_PARAM'),
+        $ev_bs_vi_z(18, 'lp1_minstrom_a', 'S2_18_PARAM'),
+        $ev_bs_vi_z(19, 'lp1_maxstrom_a', 'S2_19_PARAM'),
+        $ev_bs_vi_z(20, 'lp1_phasen_soll', 'S2_20_PARAM'),
+        $ev_bs_vi_z(21, 'lp1_prioritaet', 'S2_21_PARAM'),
+        $ev_bs_vi_z(22, 'lp1_smartcost_grenze', 'S2_22_PARAM'),
+        $ev_bs_vi_z(23, 'lp1_batterieboost', 'S2_23_PARAM'),
+        $ev_bs_zl(24, 'T_STATUS', 'S2_24', 'S2_24_PARAM', 'V1 = #17, V2 = #18, V3 = #19, V4 = #20, V5 = #21, V6 = #22, V7 = #23'),
+        $ev_bs_vi_z(25, 'lp1_plan_aktiv', 'S2_25_PARAM'),
+        $ev_bs_vi_z(26, 'lp1_plan_soc', 'S2_26_PARAM'),
+        $ev_bs_vi_z(27, 'lp1_plan_kwh', 'S2_27_PARAM'),
+        $ev_bs_zl(28, 'T_STATUS', 'S2_28', 'S2_28_PARAM', 'V1 = #25, V2 = #26, V3 = #27'),
+        $ev_bs_vi_z(29, 'fz1_soc', 'S2_29_PARAM'),
+        $ev_bs_vi_z(30, 'fz1_km', 'S2_30_PARAM'),
+        $ev_bs_vi_z(31, 'fz1_limit_soc', 'S2_31_PARAM'),
+        $ev_bs_zl(32, 'T_STATUS', 'S2_32', 'S2_32_PARAM', 'V1 = #29, V2 = #30, V3 = #31'),
+        ),
+        'schritte' => array(
+            array('S2_SCHRITT1', array()),
+            array('S2_SCHRITT2', array($ev_bs_vi_t, ev_feld_titel('lp1_gesamt_kwh'))),
+            array('S2_SCHRITT3', array($ev_bs_gw('lp1_fahrzeug_name'))),
+            array('S2_SCHRITT4', array(ev_t('LOX.T_PARAMETER'))),
+        ),
+        'hinweise' => array(
+            array('S2_H1', array()),
+            array('S2_H2', array()),
+            array('S2_H3', array($ev_bs_gw('lp2_fahrzeug_name'))),
+        )),
+    array('kopf' => 'BL_STEUERUNG', 'seite' => 'EVCC Steuerung', 'bild' => 'einbindung_loxone_steuerung.png', 'zeilen' => array(
+        $ev_bs_zl(1, 'T_VSCHIEBER', 'S3_01', 'S3_01_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(2, 'TYP_VOB', 'limitsoc', 1, 'S3_02_PARAM', $ev_bs_ein(1)),
+        $ev_bs_zl(3, 'T_VSCHIEBER', 'S3_03', 'S3_03_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(4, 'TYP_VOB', 'minsoc', 1, '', $ev_bs_ein(3)),
+        $ev_bs_zl(5, 'T_RADIO', 'S3_05', 'S3_05_PARAM', $ev_bs_m),
+        $ev_bs_zl(6, 'T_FORMEL', 'S3_06', 'S3_06_PARAM', 'I1 = #5'),
+        $ev_bs_vo_z(7, 'TYP_VOB', 'phasen', 1, '', $ev_bs_ein(6)),
+        $ev_bs_zl(8, 'T_VSCHIEBER', 'S3_08', 'S3_08_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(9, 'TYP_VOB', 'minstrom', 1, '', $ev_bs_ein(8)),
+        $ev_bs_zl(10, 'T_VSCHIEBER', 'S3_10', 'S3_10_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(11, 'TYP_VOB', 'maxstrom', 1, '', $ev_bs_ein(10)),
+        $ev_bs_zl(12, 'T_VSCHIEBER', 'S3_12', 'S3_12_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(13, 'TYP_VOB', 'prioritaet', 1, '', $ev_bs_ein(12)),
+        $ev_bs_zl(14, 'T_VSCHIEBER', 'S3_14', 'S3_14_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(15, 'TYP_VOB', 'smartcostlimit', 1, 'S3_15_PARAM', $ev_bs_ein(14)),
+        $ev_bs_zl(16, 'T_VSCHALTER', 'S3_16', 'S3_16_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(17, 'TYP_VOB', 'batterieboost', 1, '', $ev_bs_ein(16)),
+        $ev_bs_zl(18, 'T_VSCHIEBER', 'S3_18', 'S3_18_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(19, 'TYP_VOB', 'plansoc_ziel', 1, '', $ev_bs_ein(18)),
+        $ev_bs_zl(20, 'T_VSCHIEBER', 'S3_20', 'S3_20_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(21, 'TYP_VOB', 'plansoc_stunden', 1, 'S3_21_PARAM', $ev_bs_ein(20)),
+        $ev_bs_zl(22, 'T_VTASTE', 'S3_22', 'S3_22_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(23, 'TYP_VOB', 'planaus', 1, '', $ev_bs_ein(22)),
+        $ev_bs_zl(24, 'T_VSCHIEBER', 'S3_24', 'S3_24_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(25, 'TYP_VOB', 'limitenergie', 1, 'S3_25_PARAM', $ev_bs_ein(24)),
+        $ev_bs_zl(26, 'T_VTASTE', 'S3_26', 'S3_26_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(27, 'TYP_VOB', 'fahrzeugaus', 1, '', $ev_bs_ein(26)),
+        ),
+        'schritte' => array(
+            array('S3_SCHRITT1', array(ev_t('REITER.EINSTELLUNGEN'), ev_t('EINST.L_STEUERUNG'))),
+            array('S3_SCHRITT2', array($ev_bs_vo_t)),
+            array('S3_SCHRITT3', array()),
+            array('S3_SCHRITT4', array()),
+            array('S3_SCHRITT5', array($ev_bs_vo_t, ev_befehl_titel('smartcostlimit', 1), ev_befehl_titel('limitenergie', 1))),
+            array('S3_SCHRITT6', array(ev_feld_titel('lp1_limit_soc'))),
+        ),
+        'hinweise' => array(
+            array('S3_H1', array()),
+            array('S3_H2', array()),
+            array('S3_H3', array()),
+            array('S3_H4', array()),
+            array('S3_H5', array(ev_befehl_titel('fahrzeug', 1, 1))),
+            array('S3_H6', array()),
+        )),
+    array('kopf' => 'BL_SPEICHER', 'seite' => 'EVCC Hausspeicher und Tarif', 'bild' => 'einbindung_loxone_hausspeicher_tarif.png', 'zeilen' => array(
+        $ev_bs_zl(1, 'T_RADIO', 'S4_01', 'S4_01_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(2, 'TYP_VOB', 'batteriemodus', 0, 'S4_02_PARAM', $ev_bs_ein(1)),
+        $ev_bs_zl(3, 'T_VSCHIEBER', 'S4_03', 'S4_03_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(4, 'TYP_VOB', 'prioritaetssoc', 0, '', $ev_bs_ein(3)),
+        $ev_bs_zl(5, 'T_VSCHIEBER', 'S4_05', 'S4_05_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(6, 'TYP_VOB', 'puffersoc', 0, '', $ev_bs_ein(5)),
+        $ev_bs_zl(7, 'T_VSCHIEBER', 'S4_07', 'S4_07_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(8, 'TYP_VOB', 'residualleistung', 0, '', $ev_bs_ein(7)),
+        $ev_bs_zl(9, 'T_VSCHALTER', 'S4_09', 'S4_09_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(10, 'TYP_VOB', 'entladeregelung', 0, '', $ev_bs_ein(9)),
+        $ev_bs_zl(11, 'T_VSCHIEBER', 'S4_11', 'S4_11_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(12, 'TYP_VOB', 'netzladegrenze', 0, 'S4_12_PARAM', $ev_bs_ein(11)),
+        $ev_bs_zl(13, 'T_VTASTE', 'S4_13', 'S4_13_PARAM', $ev_bs_m),
+        $ev_bs_vo_z(14, 'TYP_VOB', 'netzladenaus', 0, '', $ev_bs_ein(13)),
+        $ev_bs_vi_z(15, 'batteriemodus_nr', 'S4_15_PARAM'),
+        $ev_bs_vi_z(16, 'prioritaets_soc', 'S4_16_PARAM'),
+        $ev_bs_vi_z(17, 'puffer_soc', 'S4_17_PARAM'),
+        $ev_bs_vi_z(18, 'residualleistung_w', 'S4_18_PARAM'),
+        $ev_bs_vi_z(19, 'entladeregelung', 'S4_19_PARAM'),
+        $ev_bs_vi_z(20, 'netzladen_aktiv', 'S4_20_PARAM'),
+        $ev_bs_vi_z(21, 'speicher_kapazitaet_kwh', 'S4_21_PARAM'),
+        $ev_bs_vi_z(22, 'speicher_soc', 'S4_22_PARAM'),
+        $ev_bs_zl(23, 'T_STATUS', 'S4_23', 'S4_23_PARAM', 'V1 = #15, V2 = #16, V3 = #17, V4 = #18, V5 = #19, V6 = #20, V7 = #21, V8 = #22'),
+        $ev_bs_vi_z(24, 'tarif_einspeisung', 'S4_24_PARAM'),
+        $ev_bs_vi_z(25, 'tarif_co2', 'S4_25_PARAM'),
+        $ev_bs_vi_z(26, 'preis_min_24h', 'S4_26_PARAM'),
+        $ev_bs_vi_z(27, 'preis_max_24h', 'S4_27_PARAM'),
+        $ev_bs_vi_z(28, 'preis_schnitt_24h', 'S4_28_PARAM'),
+        $ev_bs_vi_z(29, 'preis_ok', 'S4_29_PARAM'),
+        $ev_bs_zl(30, 'T_STATUS', 'S4_30', 'S4_30_PARAM', 'V1 = #29, V2 = #26, V3 = #27, V4 = #28, V5 = #24, V6 = #25'),
+        $ev_bs_vi_z(31, 'gruen_laden', 'S4_31_PARAM'),
+        $ev_bs_vi_z(32, 'zusatz_kw', 'S4_32_PARAM'),
+        $ev_bs_zl(33, 'T_STATUS', 'S4_33', 'S4_33_PARAM', 'V1 = #31, V2 = #32'),
+        ),
+        'schritte' => array(
+            array('S4_SCHRITT1', array()),
+            array('S4_SCHRITT2', array($ev_bs_vo_t, $ev_bs_vi_t)),
+            array('S4_SCHRITT3', array()),
+            array('S4_SCHRITT4', array(ev_t('LOX.T_PARAMETER'))),
+            array('S4_SCHRITT5', array($ev_bs_vo_t, ev_befehl_titel('netzladegrenze', 0))),
+        ),
+        'hinweise' => array(
+            array('S4_H1', array()),
+            array('S4_H2', array()),
+            array('S4_H3', array()),
+            array('S4_H4', array()),
+        )),
+);
+?>
+<?php foreach ($ev_bs_seiten as $ev_bs_s) { ?>
+<h4 class="sm-h4"><?= ev_e(ev_t('LOX.' . $ev_bs_s['kopf'])) ?></h4>
+<div class="sm-hinweis"><b><?= $ev_bs_k('SCHRITTE_TITEL') ?></b>
+<ol class="sm-schritte">
+<?php foreach ($ev_bs_s['schritte'] as $ev_bs_x) { ?>
+<li><?= $ev_bs_k($ev_bs_x[0], $ev_bs_x[1]) ?></li>
+<?php } ?>
+</ol></div>
 <table class="sm-tbl">
 <tr><th>#</th><th><?= ev_e(ev_t('LOX.T_BAUSTEIN')) ?></th><th><?= ev_e(ev_t('LOX.T_NAME')) ?></th><th><?= ev_e(ev_t('LOX.T_PARAMETER')) ?></th><th><?= ev_e(ev_t('LOX.T_VERBINDEN')) ?></th></tr>
-<?php /* Namen aus den Sprachdateien (O7) und die Titel der Ausgaenge aus
-         derselben Quelle wie die Vorlage (O8, ev_befehl_titel()). Bis 0.9.33
-         standen die Namen fest auf Deutsch, in Umschrift, und #8/#9 nannten
-         Ausgaenge ohne den seit 0.9.27 geltenden Vorsatz SET_. */ ?>
-<?php /* Welle Bild 4 (0.9.42, Entscheidung A): die Liste ist die im LoxBerry-Plugins
-         Musterprojekt in Loxone Config gebaute und mit leitungen_setzen.py verbundene
-         (Musterprojekt/baustein_listen.txt, Abschnitt EVCC) - eine Zeile = ein Baustein,
-         nur die Hauptvariante. Bausteinnamen in beiden Sprachen wie im Musterprojekt.
-         Der Name von #12 und die Befehle im Hinweis zur Abfahrtszeit kommen wie bisher
-         aus ev_befehl_titel(), derselben Quelle wie die Vorlage. */ ?>
-<tr><td>1</td><td><?= ev_t('BAUSTEIN.B1_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B1_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B1_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B1_VERB') ?></td></tr>
-<tr><td>2</td><td><?= ev_t('BAUSTEIN.B2_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B2_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B2_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B2_VERB') ?></td></tr>
-<tr><td>3</td><td><?= ev_t('BAUSTEIN.B3_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B3_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B3_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B3_VERB') ?></td></tr>
-<tr><td>4</td><td><?= ev_t('BAUSTEIN.B4_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B4_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B4_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B4_VERB') ?></td></tr>
-<tr><td>5</td><td><?= ev_t('BAUSTEIN.B5_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B5_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B5_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B5_VERB') ?></td></tr>
-<tr><td>6</td><td><?= ev_t('BAUSTEIN.B6_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B6_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B6_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B6_VERB') ?></td></tr>
-<tr><td>7</td><td><?= ev_t('BAUSTEIN.B7_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B7_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B7_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B7_VERB') ?></td></tr>
-<tr><td>8</td><td><?= ev_t('BAUSTEIN.B8_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B8_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B8_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B8_VERB') ?></td></tr>
-<tr><td>9</td><td><?= ev_t('BAUSTEIN.B9_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B9_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B9_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B9_VERB') ?></td></tr>
-<tr><td>10</td><td><?= ev_t('BAUSTEIN.B10_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B10_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B10_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B10_VERB') ?></td></tr>
-<tr><td>11</td><td><?= ev_t('BAUSTEIN.B11_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B11_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B11_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B11_VERB') ?></td></tr>
-<tr><td>12</td><td><?= ev_t('BAUSTEIN.B12_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_befehl_titel('modus', 1)) ?></span></td><td><?= ev_t('BAUSTEIN.B12_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B12_VERB') ?></td></tr>
-<tr><td>13</td><td><?= ev_t('BAUSTEIN.B13_TYP') ?></td><td><span class="sm-mono"><?= ev_e(ev_t('BAUSTEIN.B13_NAME')) ?></span></td><td><?= ev_t('BAUSTEIN.B13_PARAM') ?></td><td><?= ev_t('BAUSTEIN.B13_VERB') ?></td></tr>
+<?php foreach ($ev_bs_s['zeilen'] as $ev_bs_z) { ?>
+<tr><td><?= (int) $ev_bs_z[0] ?></td><td><?= $ev_bs_z[1] ?></td><td><?= $ev_bs_z[2] ?></td><td><?= $ev_bs_z[3] ?></td><td><?= $ev_bs_z[4] ?></td></tr>
+<?php } ?>
 </table>
-<?= ev_t('LOX.S4_ERLAEUTERUNG') ?><br>
-<?= sprintf(ev_t('LOX.S4_ABFAHRT'), ev_e(ev_befehl_titel('plansoc_ziel', 1)), ev_e(ev_befehl_titel('plansoc_stunden', 1))) ?><br>
-<?= ev_t('LOX.S4_SCHWELLEN') ?>
+<div class="sm-warnung"><b><?= $ev_bs_k('HINWEISE_TITEL') ?></b>
+<ul class="sm-schritte">
+<?php foreach ($ev_bs_s['hinweise'] as $ev_bs_x) { ?>
+<li><?= $ev_bs_k($ev_bs_x[0], $ev_bs_x[1]) ?></li>
+<?php } ?>
+</ul></div>
 <figure class="sm-bild">
-<img src="einbindung_loxone.png" alt="<?= ev_e(ev_t('LOX.BILD_ALT')) ?>" loading="lazy">
-<figcaption><?= ev_e(ev_t('LOX.BILD_UNTERSCHRIFT')) ?></figcaption>
+<img src="<?= ev_e($ev_bs_s['bild']) ?>" alt="<?= ev_e(sprintf(ev_t('LOX.BILD_ALT'), $ev_bs_s['seite'])) ?>" loading="lazy">
+<figcaption><?= ev_e(sprintf(ev_t('LOX.BILD_UNTERSCHRIFT'), $ev_bs_s['seite'])) ?></figcaption>
 </figure>
 <p class="sm-hilfe"><?= ev_t('LOX.MUSTERPROJEKT') ?></p>
+<?php } ?>
 </div>
 
 <div class="sm-step"><b><?= ev_e(ev_t('LOX.S_GEGENPROBE_T')) ?></b><br>

@@ -506,6 +506,11 @@ $ev_wz = ev_wache_anwenden($aktion, $klar, $ev_von, $ev_probe);
  *   - ein anderer Wert hoechstens alle 10 s (429, GRUND=BREMSE, WARTEN_S);
  *   - ist die Merkerdatei nicht zu oeffnen, faellt die Bremse geschlossen
  *     aus: 503 und eine Protokollzeile.
+ * Seit 0.9.43 (Hausherr 13.10.2026) wird ein mit 429 abgewiesener Wert nicht
+ * mehr verworfen: der Merker haelt ihn am Eintrag des Befehls fest (Antwort
+ * ;NACHREICHEN=1), und der Abrufdienst reicht ihn nach Ablauf der Sperre nach -
+ * je Befehl und Ladepunkt nur den letzten (ev_bremse_urteil(),
+ * ev_bremse_nachreichen() in ev_lib.php). Grenzen dort als Konstanten.
  * Die Sperre bleibt bis zum Ende des Befehls gehalten; zwei gleichzeitige
  * Befehle laufen damit nacheinander, nicht ueber einander. */
 $ev_bremse = ev_tmpdir() . '/befehlsbremse.json';
@@ -537,14 +542,24 @@ $ev_bm = ($ev_bfh === null) ? array() : json_decode((string) stream_get_contents
 if (!is_array($ev_bm)) { $ev_bm = array(); }
 $ev_bschl = $aktion . '|' . ($b['ebene'] === 'lp' ? $lp : 0);
 $ev_bwert = $klar . ($b['pruef'] === 'plan' ? '|' . $std : '');
-if (isset($ev_bm[$ev_bschl]) && is_array($ev_bm[$ev_bschl])) {
-    $ev_seit = time() - (int) $ev_bm[$ev_bschl]['t'];
-    if ((string) $ev_bm[$ev_bschl]['w'] === $ev_bwert && $ev_seit < 60) {
-        ev_ende(200, 'EVCC;OK=1;AKTION=' . $aktion . ';WERT=' . $klar . ';UNVERAENDERT=1');
-    }
-    if ($ev_seit < 10) {
-        ev_ende(429, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BREMSE;WARTEN_S=' . (10 - max(0, $ev_seit)));
-    }
+/* Urteil und Nachreichen seit 0.9.43 in ev_bremse_urteil(): gleiche Grenzen und
+ * Vergleiche wie bis 0.9.42 hier. Neu: im Fall 429 merkt sich der Merker den
+ * Wert zum Nachreichen; UNVERAENDERT und ein durchgehender Wert streichen einen
+ * gemerkten. Der Trockenlauf merkt sich nichts und schreibt nichts. */
+$ev_bm_vorher = $ev_bm;
+list($ev_burteil, $ev_bwarten, $ev_bgemerkt) = ev_bremse_urteil($ev_bm, $ev_bschl, $ev_bwert, time(),
+    $ev_probe ? null : array('a' => $aktion, 'lp' => $lp, 'k' => $klar, 's' => $std, 'von' => $ev_von));
+if (!$ev_probe && $ev_bm !== $ev_bm_vorher && !ev_bremse_schreiben($ev_bfh, $ev_bm)) {
+    ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') liess sich '
+        . 'nicht schreiben - ein abgewiesener Wert wird nicht nachgereicht.');
+    $ev_bgemerkt = false;
+}
+if ($ev_burteil === 'unveraendert') {
+    ev_ende(200, 'EVCC;OK=1;AKTION=' . $aktion . ';WERT=' . $klar . ';UNVERAENDERT=1');
+}
+if ($ev_burteil === 'gebremst') {
+    ev_ende(429, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BREMSE;WARTEN_S=' . $ev_bwarten
+        . ($ev_bgemerkt ? ';NACHREICHEN=1' : ''));
 }
 
 /* ---------------- Ladeplan aus zwei Ausgaengen (C11, seit 0.9.34) ----------------

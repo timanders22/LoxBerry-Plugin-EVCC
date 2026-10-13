@@ -3319,7 +3319,7 @@ function ev_vorlage_ein()
             // Das Semikolon gehoert ins Suchmuster. Jedes Feld steht in der
             // Zeile hinter einem ';' - ohne es traefe ein kuenftiger Feldname,
             // der auf einen bestehenden endet, die falsche Stelle.
-            'title' => 'EVCC_' . strtoupper($name),
+            'title' => ev_feld_titel($name),
             'comment' => $text,
             'check' => '\i;' . strtoupper($name) . '=\i\v',
             'analog' => $d['analog'], 'min' => $min, 'max' => $d['max'],
@@ -3328,7 +3328,7 @@ function ev_vorlage_ein()
         );
     }
     return array('VI_evcc.xml', ev_xml_virtual_in_http(array(
-        'title'   => 'EVCC',
+        'title'   => ev_vorlage_titel_ein(),
         'address' => ev_endpunkt('status'),
         'polling' => '30',
         'comment' => sprintf(ev_t('VORLAGE.KOMMENTAR_EIN'), date('d.m.Y')),
@@ -3351,9 +3351,13 @@ function ev_vorlage_aus()
     $teile = explode('/index.php?', $basis, 2);
     $adresse = $teile[0];
     $frage = '/index.php?token=' . $cfg['aktionstoken'] . '&aktion=';
+    /* Fahrzeugwahl je Fahrzeug (seit 0.9.43): aus den Fahrzeugen, die EVCC beim
+     * letzten Abruf gemeldet hat. Ohne gelungenen Abruf gibt es keinen solchen
+     * Befehl; der Reiter sagt das (LOX.FAHRZEUG_JE). */
+    $fahrzeuge = ev_fahrzeug_befehle(ev_fahrzeugnamen());
 
     $cmds = array();
-    $bauen = function ($aktion, $b, $lp) use (&$cmds, $frage) {
+    $bauen = function ($aktion, $b, $lp) use (&$cmds, $frage, $fahrzeuge) {
         /* Der Titel traegt seit 0.9.27 den Vorsatz SET_ - aus
          * ev_befehl_titel(), derselben Stelle, aus der die Baustein-Liste im
          * Reiter Einbindung in Loxone ihn nimmt (O8, seit 0.9.34). */
@@ -3366,6 +3370,17 @@ function ev_vorlage_aus()
          * den Miniserver von anderen Schreibern unterscheidet. Wer die Vorlage nicht
          * neu einliest, erscheint dort als "ohne Kennung" - kein Fehler. */
         $adr = $frage . $aktion . ($lp ? '&lp=' . $lp : '') . '&von=loxone';
+        if ($b['pruef'] === 'name') {
+            /* Je Fahrzeug ein Digitalausgang mit festem Namen (seit 0.9.43); der
+             * allgemeine Befehl mit <v.0> geht nicht mehr in die Vorlage. Der
+             * Kommentar (Kachelname) ist der Fahrzeugname. */
+            foreach ($fahrzeuge as $fz) {
+                $cmds[] = array('title' => ev_befehl_titel($aktion, $lp, $fz[0]), 'comment' => $fz[1],
+                                'analog' => false, 'method' => 'GET', 'hint' => $c['hint'],
+                                'on' => $adr . '&wert=' . rawurlencode($fz[1]), 'off' => '');
+            }
+            return;
+        }
         if ($b['pruef'] === 'ohne') {
             // DELETE-Befehle brauchen keinen Wert: ein Digitalausgang, der
             // beim Einschalten ausloest.
@@ -3374,14 +3389,10 @@ function ev_vorlage_aus()
         } elseif ($b['pruef'] === 'schalter') {
             $c['on'] = $adr . '&wert=1';
             $c['off'] = $adr . '&wert=0';
-        } elseif ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') {
-            /* Ladeplan aus zwei Ausgaengen, jeder mit <v> (C11, seit 0.9.34):
-             * <v.N> ist in Loxone derselbe Wert mit N Nachkommastellen, zwei
-             * Werte lassen sich aus einem Ausgang nicht bilden. */
-            $c['on'] = $adr . '&wert=<v>';
-            $c['off'] = '';
         } else {
-            $c['on'] = $adr . '&wert=<v.0>';
+            /* Analogbefehl: <v.0>, bei der Pruefart 'zahl' <v.3>, beim Ladeplan
+             * aus zwei Ausgaengen <v> (C11) - aus ev_vorlage_platzhalter(). */
+            $c['on'] = $adr . '&wert=' . ev_vorlage_platzhalter($b);
             $c['off'] = '';
         }
         $cmds[] = $c;
@@ -3397,7 +3408,7 @@ function ev_vorlage_aus()
     }
 
     return array('VQ_evcc.xml', ev_xml_virtual_out(array(
-        'title'   => ev_t('VORLAGE.TITEL_AUS'),
+        'title'   => ev_vorlage_titel_aus(),
         'address' => $adresse,
         'comment' => sprintf(ev_t('VORLAGE.KOMMENTAR_AUS'), date('d.m.Y')),
     ), $cmds));
@@ -3822,9 +3833,86 @@ function ev_befehle()
  * 0.9.34). Bis 0.9.33 nannte die Liste EVCC_MODUS_LP1, die Vorlage aber seit
  * 0.9.27 EVCC_SET_MODUS_LP1 (Pruefbericht oberflaeche, Befund 12).
  */
-function ev_befehl_titel($aktion, $lp = 0)
+function ev_befehl_titel($aktion, $lp = 0, $nr = 0)
 {
-    return 'EVCC_SET_' . strtoupper((string) $aktion) . ($lp ? '_LP' . (int) $lp : '');
+    /* $nr (seit 0.9.43): Nummer des Fahrzeugs bei der Fahrzeugwahl je Fahrzeug,
+     * EVCC_SET_FAHRZEUG_<N>_LP<n> - N in der Reihenfolge von ev_fahrzeugnamen(),
+     * also dieselbe Zaehlung wie EVCC_FZ<N>_... in der Eingangsvorlage. */
+    return 'EVCC_SET_' . strtoupper((string) $aktion) . ($nr ? '_' . (int) $nr : '')
+         . ($lp ? '_LP' . (int) $lp : '');
+}
+
+/**
+ * Titel eines Eingangs der Vorlage "EVCC" - EINE Stelle fuer die Vorlage
+ * (ev_vorlage_ein()) und die Baustein-Listen im Reiter Einbindung in Loxone
+ * (seit 0.9.43, Bauart ev_befehl_titel()).
+ */
+function ev_feld_titel($name)
+{
+    return 'EVCC_' . strtoupper((string) $name);
+}
+
+/**
+ * Die Titel der beiden Vorlagen. Sprachregel vom 13.10.2026 (Regeln/07,
+ * "Sprache einer Loxone-Vorlage: Titel fest, Kommentare uebersetzt"): Vorlagen-
+ * und Befehlstitel stehen fest im Code und werden NIE uebersetzt - sie werden in
+ * Config zu Namen und muessen zum Musterprojekt und zur Baustein-Liste passen.
+ * Bis 0.9.42 hiess die Ausgangsvorlage in einer englischen Oberflaeche
+ * "EVCC commands" (Sprachschluessel TITEL_AUS, seit 0.9.43 gestrichen), das
+ * Musterprojekt und die Liste aber
+ * "EVCC Befehle". Die Kommentare kommen weiter aus der Sprachdatei.
+ */
+function ev_vorlage_titel_ein()
+{
+    return 'EVCC';
+}
+
+function ev_vorlage_titel_aus()
+{
+    return 'EVCC Befehle';
+}
+
+/**
+ * Wertplatzhalter eines Analogbefehls in der Ausgangsvorlage - EINE Stelle fuer
+ * die Vorlage und die Befehlstabelle im Reiter (seit 0.9.43).
+ *
+ * <v.N> ist in Loxone derselbe Analogwert mit N Nachkommastellen. Bis 0.9.42
+ * trugen alle Analogbefehle ausser dem Ladeplan <v.0> - auch die drei mit der
+ * Pruefart 'zahl' (Preisgrenze smartcostlimit, Energieziel limitenergie,
+ * Netzladegrenze): aus 0,25 je kWh wurde eine glatte 0, und die Wallbox lud nur
+ * noch bei negativen Preisen. Der Reiter (SPOT.GRENZE_EINHEIT) sagte schon das
+ * Richtige, die Vorlage nicht (Entwurf Welle 12 ev, Entscheidung 8, Hausherr
+ * 13.10.2026). Die beiden Ladeplan-Befehle tragen <v> (C11, seit 0.9.34).
+ */
+function ev_vorlage_platzhalter($b)
+{
+    if ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') { return '<v>'; }
+    if ($b['pruef'] === 'zahl') { return '<v.3>'; }
+    return '<v.0>';
+}
+
+/**
+ * Fahrzeugwahl je Fahrzeug (seit 0.9.43, Entwurf Welle 12 ev, Entscheidung 9).
+ *
+ * Bis 0.9.42 stand in der Ausgangsvorlage EIN Befehl EVCC_SET_FAHRZEUG_LP<n>,
+ * digital, mit wert=<v.0>: beim Einschalten ging "1" als Fahrzeugname hinaus,
+ * und EVCC kennt kein Fahrzeug "1". Jetzt bekommt jedes Fahrzeug, das EVCC beim
+ * letzten Abruf gemeldet hat, einen eigenen Digitalbefehl mit festem Namen.
+ * Rueckgabe: Liste von array(Nummer, Name). Die Nummer ist die Stelle in $namen
+ * (ab 1, Reihenfolge wie ev_fahrzeugnamen()); ein Name, den der Endpunkt
+ * abwiese (ev_befehl_pruefen, Pruefart 'name'), bekommt keinen Befehl - die
+ * Nummern der uebrigen bleiben, wie sie sind.
+ */
+function ev_fahrzeug_befehle($namen)
+{
+    $aus = array();
+    $i = 0;
+    foreach ((array) $namen as $name) {
+        $i++;
+        list($ok, $klar) = ev_befehl_pruefen(array('pruef' => 'name'), (string) $name);
+        if ($ok && $klar === (string) $name) { $aus[] = array($i, (string) $name); }
+    }
+    return $aus;
 }
 
 function ev_befehl_pruefen($b, $wert)
@@ -3911,6 +3999,415 @@ function ev_befehl_pruefen($b, $wert)
         return array(1, $n);
     }
     return array(0, 'UNBEKANNTE_PRUEFUNG');
+}
+
+/* ==================================================================
+ * Befehlsbremse: Urteil und Nachreichen (seit 0.9.43)
+ *
+ * Die Bremse steht seit 0.9.34 im Endpunkt (C3; Regeln/03 "Jeder Ausloeser,
+ * den eine fremde Anlage bedient, braucht eine Bremse im Plugin"): derselbe
+ * Wert geht innerhalb von EV_BREMSE_GLEICH_S nicht noch einmal an EVCC
+ * (UNVERAENDERT=1), ein anderer Wert hoechstens alle EV_BREMSE_ABSTAND_S
+ * (HTTP 429, GRUND=BREMSE). Bis 0.9.42 war ein mit 429 abgewiesener Wert
+ * verloren: ein Schieberegler, zweimal binnen 10 s verstellt, liess in EVCC
+ * den vorletzten Wert stehen und in der App den letzten - Loxone sendet nicht
+ * nach (Entwurf Welle 12 ev, Entscheidung 15).
+ *
+ * Seit 0.9.43 (Verhaltensaenderung, vom Hausherrn am 13.10.2026 ausdruecklich
+ * freigegeben) merkt sich der Endpunkt den abgewiesenen Wert am Eintrag des
+ * Befehls im selben Merker ('n'), und der Abrufdienst reicht ihn nach Ablauf
+ * der Sperre nach - je Befehl und Ladepunkt nur den LETZTEN:
+ *   - ein weiterer abgewiesener Wert ersetzt den gemerkten;
+ *   - ein spaeterer Wert, der selbst durchgeht oder als unveraendert
+ *     beantwortet wird, streicht ihn (der letzte Wert ist dann schon da);
+ *   - gesendet wird mit dem naechsten Abruf nach Ablauf der Sperre (Takt ab
+ *     Werk 15 s); danach gilt der nachgereichte Wert fuer die Bremse wie ein
+ *     gesendeter;
+ *   - was nach EV_NACHREICHEN_FRIST_S noch nicht gesendet ist (der
+ *     Abrufdienst stand), verfaellt mit einer Protokollzeile;
+ *   - der Trockenlauf (&probe=1) merkt sich nichts;
+ *   - ist die Steuerung aus Loxone inzwischen abgeschaltet, wird nichts
+ *     nachgereicht.
+ * Die Rechnung steht ohne Datei und ohne Netz in ev_bremse_urteil() und
+ * ev_bremse_nachreichen_kern(); bin/ev_abruf.php --selbsttest prueft beide
+ * (ev_bremse_selbsttest()).
+ * ================================================================== */
+
+/** Derselbe Wert geht innerhalb dieser Sekunden nicht noch einmal hinaus. */
+define('EV_BREMSE_GLEICH_S', 60);
+/** Ein anderer Wert hoechstens alle so viele Sekunden (sonst 429). */
+define('EV_BREMSE_ABSTAND_S', 10);
+/** Ein gemerkter Wert, der so lange nicht nachgereicht wurde, verfaellt. */
+define('EV_NACHREICHEN_FRIST_S', 300);
+
+function ev_bremse_datei()
+{
+    return ev_tmpdir() . '/befehlsbremse.json';
+}
+
+/** Den Merker in die offene, gesperrte Datei schreiben. Rueckgabe: gelungen? */
+function ev_bremse_schreiben($fh, array $inhalt)
+{
+    return is_resource($fh) && ftruncate($fh, 0) && rewind($fh)
+        && fwrite($fh, (string) json_encode($inhalt)) !== false && fflush($fh);
+}
+
+/**
+ * Urteil der Befehlsbremse ueber einen gepruefen Befehl - ohne Datei, ohne Netz.
+ *
+ * $bm  Inhalt des Merkers, wird veraendert ('n' gemerkt oder gestrichen)
+ * $schl Befehl|Ladepunkt (Anlage: |0), $bwert der verglichene Wert,
+ * $jetzt Zeitpunkt, $nachreichen null (Trockenlauf: nichts merken) oder
+ * array('a' => Aktion, 'lp' => Ladepunkt, 'k' => Klarwert, 's' => Stunden,
+ * 'von' => Kennung) fuer den Fall, dass gebremst wird.
+ * Rueckgabe: array(Urteil, Wartezeit, gemerkt) mit Urteil 'frei',
+ * 'unveraendert' oder 'gebremst'. Vergleich und Grenzen wie bis 0.9.42 im
+ * Endpunkt.
+ */
+function ev_bremse_urteil(array &$bm, $schl, $bwert, $jetzt, $nachreichen = null)
+{
+    if (isset($bm[$schl]) && is_array($bm[$schl])) {
+        $seit = (int) $jetzt - (int) (isset($bm[$schl]['t']) ? $bm[$schl]['t'] : 0);
+        $w = isset($bm[$schl]['w']) ? (string) $bm[$schl]['w'] : '';
+        if ($w === (string) $bwert && $seit < EV_BREMSE_GLEICH_S) {
+            unset($bm[$schl]['n']);    // der letzte Wert ist der gesendete
+            return array('unveraendert', 0, false);
+        }
+        if ($seit < EV_BREMSE_ABSTAND_S) {
+            $warten = EV_BREMSE_ABSTAND_S - max(0, $seit);
+            if (is_array($nachreichen)) {
+                $bm[$schl]['n'] = array_merge($nachreichen,
+                    array('w' => (string) $bwert, 'seit' => (int) $jetzt));
+                return array('gebremst', $warten, true);
+            }
+            return array('gebremst', $warten, false);
+        }
+        unset($bm[$schl]['n']);        // dieser Wert geht selbst hinaus
+    }
+    return array('frei', 0, false);
+}
+
+/**
+ * Faellige gemerkte Werte nachreichen - ohne Datei und ohne Netz.
+ *
+ * $bm Bremsmerker, $pm Ladeplan-Merker (beide werden veraendert), $jetzt
+ * Zeitpunkt, $senden function ($pfad, $methode) mit einer Antwort wie
+ * ev_http() (mindestens 'ok', 'code', 'fehler'). Gesendet wird ein gemerkter
+ * Wert, sobald seit dem letzten gesendeten EV_BREMSE_ABSTAND_S vergangen sind;
+ * Pfad, Ladeplan und Zeit wie im Endpunkt. Rueckgabe: Liste von
+ * array(Art, Schluessel, Aktion, Klarwert, Ladepunkt (0 = Anlage), Zusatz) mit
+ * Art 'gesendet', 'gemerkt' (Ladeplan, der andere Teil fehlt), 'fehler',
+ * 'verfallen' oder 'unbekannt'.
+ */
+function ev_bremse_nachreichen_kern(array &$bm, array &$pm, $jetzt, $senden)
+{
+    $aus = array();
+    $befehle = ev_befehle();
+    foreach (array_keys($bm) as $schl) {
+        if (!is_array($bm[$schl]) || !isset($bm[$schl]['n']) || !is_array($bm[$schl]['n'])) { continue; }
+        $seit = (int) $jetzt - (int) (isset($bm[$schl]['t']) ? $bm[$schl]['t'] : 0);
+        if ($seit < EV_BREMSE_ABSTAND_S) { continue; }       // die Sperre laeuft noch
+        $n = $bm[$schl]['n'];
+        unset($bm[$schl]['n']);
+        $aktion = isset($n['a']) ? (string) $n['a'] : '';
+        $klar = isset($n['k']) ? (string) $n['k'] : '';
+        $lp = isset($n['lp']) ? (int) $n['lp'] : 1;
+        if (!isset($befehle[$aktion])) {
+            $aus[] = array('unbekannt', $schl, $aktion, $klar, 0, '');
+            continue;
+        }
+        $b = $befehle[$aktion];
+        $lp_anzeige = ($b['ebene'] === 'lp') ? $lp : 0;
+        if ((int) $jetzt - (int) (isset($n['seit']) ? $n['seit'] : 0) > EV_NACHREICHEN_FRIST_S) {
+            $aus[] = array('verfallen', $schl, $aktion, $klar, $lp_anzeige, '');
+            continue;
+        }
+        $zeit = '';
+        $wert = $klar;
+        if ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') {
+            $teil = ($b['pruef'] === 'planziel') ? 'ziel' : 'stunden';
+            $pm[(string) $lp][$teil] = $klar;
+            $z = isset($pm[(string) $lp]['ziel']) ? (string) $pm[(string) $lp]['ziel'] : '';
+            $s = isset($pm[(string) $lp]['stunden']) ? (string) $pm[(string) $lp]['stunden'] : '';
+            if ($z === '' || $s === '') {
+                $aus[] = array('gemerkt', $schl, $aktion, $klar, $lp_anzeige,
+                               $z === '' ? 'plansoc_ziel' : 'plansoc_stunden');
+                continue;
+            }
+            $zeit = gmdate('Y-m-d\TH:i:s\Z', (int) $jetzt + (int) round((float) $s * 3600));
+            $wert = $z;
+        } elseif ($b['pruef'] === 'plan') {
+            $std = isset($n['s']) ? (float) $n['s'] : 0.0;
+            $zeit = gmdate('Y-m-d\TH:i:s\Z', (int) $jetzt + (int) round($std * 3600));
+        }
+        $pfad = str_replace(array('%LP%', '%WERT%', '%ZEIT%'),
+            array((string) $lp, rawurlencode($wert), rawurlencode($zeit)), $b['pfad']);
+        $a = call_user_func($senden, $pfad, $b['methode']);
+        if (is_array($a) && !empty($a['ok'])) {
+            $bm[$schl] = array('w' => isset($n['w']) ? (string) $n['w'] : $klar, 't' => (int) $jetzt);
+            $aus[] = array('gesendet', $schl, $aktion, $klar, $lp_anzeige, $pfad);
+        } else {
+            $aus[] = array('fehler', $schl, $aktion, $klar, $lp_anzeige,
+                (is_array($a) ? 'CODE=' . (int) (isset($a['code']) ? $a['code'] : 0) . ', '
+                    . (isset($a['fehler']) ? (string) $a['fehler'] : '') : 'keine Antwort'));
+        }
+    }
+    return $aus;
+}
+
+/**
+ * Aus dem Abrufdienst (bin/ev_abruf.php, Modi cron und einmal): faellige
+ * gemerkte Werte nachreichen. Sperren in derselben Reihenfolge wie der
+ * Endpunkt (erst Bremsmerker, dann Ladeplan-Merker). Rueckgabe: Zahl der
+ * gesendeten Befehle. Jede Wirkung steht im Protokoll.
+ */
+function ev_bremse_nachreichen()
+{
+    $datei = ev_bremse_datei();
+    clearstatcache(true, $datei);
+    if (!is_file($datei)) { return 0; }
+    /* Ohne gemerkten Wert keine Sperre - der Abrufdienst laeuft im Takt, und
+     * der Endpunkt soll nicht auf ihn warten. */
+    if (strpos((string) @file_get_contents($datei), '"n":') === false) { return 0; }
+    $fh = @fopen($datei, 'c+');
+    if ($fh === false || !@flock($fh, LOCK_EX)) {
+        ev_log_wenn_neu('bremse_nach', 'Die Merkerdatei der Befehlsbremse (' . $datei . ') laesst sich '
+            . 'nicht oeffnen - gemerkte Werte werden nicht nachgereicht.');
+        return 0;
+    }
+    $bm = json_decode((string) stream_get_contents($fh), true);
+    if (!is_array($bm)) { $bm = array(); }
+    $vorher = $bm;
+    $zeilen = array();
+    $cfg = ev_config(false);
+    if (empty($cfg['steuerung_ein'])) {
+        foreach (array_keys($bm) as $k) {
+            if (is_array($bm[$k]) && isset($bm[$k]['n'])) {
+                unset($bm[$k]['n']);
+                $zeilen[] = array('gesperrt', $k, '', '', 0, '');
+            }
+        }
+    } else {
+        $pm = array();
+        $pfh = null;
+        foreach ($bm as $e) {
+            if (is_array($e) && isset($e['n']['a'])
+                && in_array((string) $e['n']['a'], array('plansoc_ziel', 'plansoc_stunden'), true)) {
+                $pfh = @fopen(ev_tmpdir() . '/ladeplan.json', 'c+');
+                if ($pfh === false || !@flock($pfh, LOCK_EX)) {
+                    ev_log_wenn_neu('ladeplan', 'Die Merkerdatei des Ladeplans (' . ev_tmpdir()
+                        . '/ladeplan.json) laesst sich nicht oeffnen - ein gemerkter Ladeplan-Wert wird nicht '
+                        . 'nachgereicht.');
+                    flock($fh, LOCK_UN);
+                    fclose($fh);
+                    return 0;
+                }
+                $pm = json_decode((string) stream_get_contents($pfh), true);
+                if (!is_array($pm)) { $pm = array(); }
+                break;
+            }
+        }
+        $pm_vorher = $pm;
+        $zeilen = ev_bremse_nachreichen_kern($bm, $pm, time(), function ($pfad, $methode) {
+            return ev_http($pfad, $methode);
+        });
+        if (is_resource($pfh)) {
+            if ($pm !== $pm_vorher && !ev_bremse_schreiben($pfh, $pm)) {
+                ev_log_wenn_neu('ladeplan', 'Die Merkerdatei des Ladeplans liess sich nicht schreiben.');
+            }
+            flock($pfh, LOCK_UN);
+            fclose($pfh);
+        }
+    }
+    if ($bm !== $vorher && !ev_bremse_schreiben($fh, $bm)) {
+        ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $datei . ') liess sich '
+            . 'nicht schreiben - die Bremse erkennt den nachgereichten Befehl nicht.');
+    }
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    $gesendet = 0;
+    foreach ($zeilen as $z) {
+        $wo = $z[4] ? 'Ladepunkt ' . (int) $z[4] : 'die Anlage';
+        if ($z[0] === 'gesendet') {
+            $gesendet++;
+            ev_log('Befehl ' . $z[2] . ' (' . $z[3] . ') an ' . $wo . ' nachgereicht - er war wegen der '
+                . 'Befehlsbremse mit 429 abgewiesen worden');
+        } elseif ($z[0] === 'gemerkt') {
+            ev_log('Befehl ' . $z[2] . ' (' . $z[3] . ') fuer ' . $wo . ' nachgereicht und fuer den Ladeplan '
+                . 'gemerkt; es fehlt noch ' . $z[5]);
+        } elseif ($z[0] === 'fehler') {
+            ev_log('Befehl ' . $z[2] . ' (' . $z[3] . ') an ' . $wo . ' nachzureichen ist FEHLGESCHLAGEN: '
+                . str_replace(array("\r", "\n"), ' ', $z[5]));
+        } elseif ($z[0] === 'verfallen') {
+            ev_log('Befehl ' . $z[2] . ' (' . $z[3] . ') fuer ' . $wo . ' nicht nachgereicht: aelter als '
+                . EV_NACHREICHEN_FRIST_S . ' s (der Abrufdienst lief nicht)');
+        } elseif ($z[0] === 'gesperrt') {
+            ev_log('Gemerkter Wert fuer ' . $z[1] . ' verworfen: die Steuerung aus Loxone ist abgeschaltet, '
+                . 'nichts gesendet');
+        } else {
+            ev_log('Gemerkter Befehl ' . $z[1] . ' ist unbekannt - verworfen');
+        }
+    }
+    if ($gesendet > 0) {
+        // Der zwischengespeicherte Zustand ist jetzt veraltet (wie im Endpunkt).
+        @unlink(ev_tmpdir() . '/state.json');
+    }
+    return $gesendet;
+}
+
+/**
+ * Selbsttest der Befehlsbremse samt Nachreichen (bin/ev_abruf.php --selbsttest,
+ * seit 0.9.43). Ohne Datei, ohne Netz, ohne Konfiguration: alle Faelle laufen
+ * ueber ev_bremse_urteil() und ev_bremse_nachreichen_kern() mit festen Zeiten
+ * und einem Sender, der nur mitschreibt. Dazu die Vorlagen-Helfer fuer <v.3>
+ * und die Fahrzeugwahl. Rueckgabe: Liste von array(ok, Beschreibung).
+ */
+function ev_bremse_selbsttest()
+{
+    $f = array();
+    $gesendet = array();
+    $ok_senden = function ($pfad, $methode) use (&$gesendet) {
+        $gesendet[] = $methode . ' ' . $pfad;
+        return array('ok' => true, 'code' => 200, 'fehler' => '');
+    };
+    $fehl_senden = function ($pfad, $methode) use (&$gesendet) {
+        $gesendet[] = $methode . ' ' . $pfad;
+        return array('ok' => false, 'code' => 502, 'fehler' => 'Probe');
+    };
+    $na = function ($aktion, $lp, $klar, $std = '') {
+        return array('a' => $aktion, 'lp' => $lp, 'k' => $klar, 's' => $std, 'von' => 'loxone');
+    };
+    $t0 = 1760000000;
+    $pm = array();
+
+    // 1-3: erster Wert frei, zweiter und dritter in der Sperre gebremst, nur der dritte gemerkt
+    $bm = array();
+    $u = ev_bremse_urteil($bm, 'limitsoc|1', '50', $t0, $na('limitsoc', 1, '50'));
+    $f[] = array($u[0] === 'frei' && !isset($bm['limitsoc|1']),
+                 'erster Wert (50) geht durch');
+    $bm['limitsoc|1'] = array('w' => '50', 't' => $t0);   // so schreibt der Endpunkt nach dem Senden
+    $u = ev_bremse_urteil($bm, 'limitsoc|1', '60', $t0 + 3, $na('limitsoc', 1, '60'));
+    $f[] = array($u[0] === 'gebremst' && $u[1] === 7 && $u[2] === true
+                 && isset($bm['limitsoc|1']['n']['k']) && $bm['limitsoc|1']['n']['k'] === '60',
+                 'zweiter Wert (60) nach 3 s: HTTP 429, WARTEN_S=7, gemerkt');
+    $u = ev_bremse_urteil($bm, 'limitsoc|1', '70', $t0 + 5, $na('limitsoc', 1, '70'));
+    $f[] = array($u[0] === 'gebremst' && $bm['limitsoc|1']['n']['k'] === '70' && $bm['limitsoc|1']['w'] === '50',
+                 'dritter Wert (70) nach 5 s: gebremst, nur er bleibt gemerkt, gesendet bleibt 50');
+
+    // 4-6: vor Ablauf nichts, nach Ablauf genau der letzte, danach nichts mehr
+    $gesendet = array();
+    ev_bremse_nachreichen_kern($bm, $pm, $t0 + 8, $ok_senden);
+    $f[] = array(!$gesendet && isset($bm['limitsoc|1']['n']),
+                 'Nachreichen nach 8 s: nichts gesendet, die Sperre laeuft');
+    $z = ev_bremse_nachreichen_kern($bm, $pm, $t0 + 10, $ok_senden);
+    $f[] = array($gesendet === array('POST /api/loadpoints/1/limitsoc/70') && !isset($bm['limitsoc|1']['n'])
+                 && $bm['limitsoc|1']['w'] === '70' && $bm['limitsoc|1']['t'] === $t0 + 10
+                 && count($z) === 1 && $z[0][0] === 'gesendet',
+                 'Nachreichen nach 10 s: genau ein Befehl, nur der letzte Wert (70), Merker fortgeschrieben');
+    $gesendet = array();
+    ev_bremse_nachreichen_kern($bm, $pm, $t0 + 25, $ok_senden);
+    $f[] = array(!$gesendet, 'naechster Abruf: nichts mehr nachzureichen');
+
+    // 7-8: der nachgereichte Wert bremst wie ein gesendeter; derselbe Wert streicht einen gemerkten
+    $u = ev_bremse_urteil($bm, 'limitsoc|1', '80', $t0 + 12, $na('limitsoc', 1, '80'));
+    $f[] = array($u[0] === 'gebremst' && $u[1] === 8 && $bm['limitsoc|1']['n']['k'] === '80',
+                 'neuer Wert (80) 2 s nach dem Nachreichen: gebremst und gemerkt');
+    $u = ev_bremse_urteil($bm, 'limitsoc|1', '70', $t0 + 13, $na('limitsoc', 1, '70'));
+    $gesendet = array();
+    ev_bremse_nachreichen_kern($bm, $pm, $t0 + 30, $ok_senden);
+    $f[] = array($u[0] === 'unveraendert' && !isset($bm['limitsoc|1']['n']) && !$gesendet,
+                 'wieder der gesendete Wert (70): UNVERAENDERT, der gemerkte (80) ist gestrichen und geht nie hinaus');
+
+    // 9: Trockenlauf merkt nichts
+    $bm2 = array('minsoc|1' => array('w' => '10', 't' => $t0));
+    $u = ev_bremse_urteil($bm2, 'minsoc|1', '20', $t0 + 1, null);
+    $f[] = array($u[0] === 'gebremst' && $u[2] === false && !isset($bm2['minsoc|1']['n']),
+                 'Trockenlauf in der Sperre: gebremst, nichts gemerkt');
+
+    // 10: ein spaeterer Wert, der selbst durchgeht, streicht den gemerkten
+    $bm3 = array('maxstrom|1' => array('w' => '16', 't' => $t0,
+        'n' => array_merge($na('maxstrom', 1, '20'), array('w' => '20', 'seit' => $t0 + 2))));
+    $u = ev_bremse_urteil($bm3, 'maxstrom|1', '25', $t0 + 11, $na('maxstrom', 1, '25'));
+    $f[] = array($u[0] === 'frei' && !isset($bm3['maxstrom|1']['n']),
+                 'spaeterer Wert (25) nach 11 s geht selbst durch, der gemerkte (20) ist gestrichen');
+
+    // 11: Frist
+    $bm4 = array('prioritaet|1' => array('w' => '1', 't' => $t0,
+        'n' => array_merge($na('prioritaet', 1, '2'), array('w' => '2', 'seit' => $t0 + 1))));
+    $gesendet = array();
+    $z = ev_bremse_nachreichen_kern($bm4, $pm, $t0 + 2 + EV_NACHREICHEN_FRIST_S, $ok_senden);
+    $f[] = array(!$gesendet && !isset($bm4['prioritaet|1']['n']) && $z[0][0] === 'verfallen',
+                 'gemerkter Wert aelter als ' . EV_NACHREICHEN_FRIST_S . ' s: verfallen, nichts gesendet');
+
+    // 12-13: Ladeplan aus zwei Ausgaengen
+    $bm5 = array('plansoc_ziel|1' => array('w' => '80', 't' => $t0,
+        'n' => array_merge($na('plansoc_ziel', 1, '90'), array('w' => '90', 'seit' => $t0 + 2))));
+    $pm5 = array('1' => array('ziel' => '80', 'stunden' => '10'));
+    $gesendet = array();
+    ev_bremse_nachreichen_kern($bm5, $pm5, $t0 + 10, $ok_senden);
+    $soll = 'POST /api/loadpoints/1/plan/soc/90/'
+          . rawurlencode(gmdate('Y-m-d\TH:i:s\Z', $t0 + 10 + 36000));
+    $f[] = array($gesendet === array($soll) && $pm5['1']['ziel'] === '90' && $bm5['plansoc_ziel|1']['w'] === '90',
+                 'Ladeplan: Ziel (90) nachgereicht, Stunden bekannt - Plan mit Vorlauf ab dem Nachreichen');
+    $bm6 = array('plansoc_stunden|1' => array('w' => '5', 't' => $t0,
+        'n' => array_merge($na('plansoc_stunden', 1, '6'), array('w' => '6', 'seit' => $t0 + 2))));
+    $pm6 = array();
+    $gesendet = array();
+    $z = ev_bremse_nachreichen_kern($bm6, $pm6, $t0 + 10, $ok_senden);
+    $f[] = array(!$gesendet && isset($pm6['1']['stunden']) && $pm6['1']['stunden'] === '6'
+                 && $bm6['plansoc_stunden|1']['w'] === '5' && $z[0][0] === 'gemerkt',
+                 'Ladeplan: Stunden (6) nachgereicht ohne Ziel - nur gemerkt, nichts gesendet');
+
+    // 14: Anlagenbefehl mit Nachkommastellen
+    $bm7 = array('netzladegrenze|0' => array('w' => '0.1', 't' => $t0,
+        'n' => array_merge($na('netzladegrenze', 1, '0.25'), array('w' => '0.25', 'seit' => $t0 + 4))));
+    $gesendet = array();
+    $z = ev_bremse_nachreichen_kern($bm7, $pm, $t0 + 10, $ok_senden);
+    $f[] = array($gesendet === array('POST /api/batterygridchargelimit/0.25') && $z[0][4] === 0,
+                 'Anlage: Netzladegrenze 0.25 nachgereicht, ohne Ladepunkt');
+
+    // 15: Sendefehler
+    $bm8 = array('phasen|1' => array('w' => '1', 't' => $t0,
+        'n' => array_merge($na('phasen', 1, '3'), array('w' => '3', 'seit' => $t0 + 3))));
+    $gesendet = array();
+    $z = ev_bremse_nachreichen_kern($bm8, $pm, $t0 + 10, $fehl_senden);
+    $f[] = array(count($gesendet) === 1 && $bm8['phasen|1']['w'] === '1' && !isset($bm8['phasen|1']['n'])
+                 && $z[0][0] === 'fehler',
+                 'Sendefehler: einmal versucht, Merker nicht fortgeschrieben, gemerkter Wert gestrichen');
+
+    // 16: je Befehl getrennt
+    $bm9 = array(
+        'limitsoc|1' => array('w' => '50', 't' => $t0,
+            'n' => array_merge($na('limitsoc', 1, '60'), array('w' => '60', 'seit' => $t0 + 1))),
+        'limitsoc|2' => array('w' => '50', 't' => $t0 + 5,
+            'n' => array_merge($na('limitsoc', 2, '65'), array('w' => '65', 'seit' => $t0 + 6))));
+    $gesendet = array();
+    ev_bremse_nachreichen_kern($bm9, $pm, $t0 + 11, $ok_senden);
+    $f[] = array($gesendet === array('POST /api/loadpoints/1/limitsoc/60') && isset($bm9['limitsoc|2']['n']),
+                 'je Befehl und Ladepunkt getrennt: Ladepunkt 1 faellig, Ladepunkt 2 noch gesperrt');
+
+    // 17: Platzhalter der Ausgangsvorlage
+    $v3 = array();
+    $falsch = array();
+    foreach (ev_befehle() as $a => $b) {
+        if (in_array($b['pruef'], array('ohne', 'schalter', 'name'), true)) { continue; }
+        $p = ev_vorlage_platzhalter($b);
+        if ($p === '<v.3>') { $v3[] = $a; }
+        $soll_p = ($b['pruef'] === 'zahl') ? '<v.3>'
+            : (($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') ? '<v>' : '<v.0>');
+        if ($p !== $soll_p) { $falsch[] = $a; }
+    }
+    sort($v3);
+    $f[] = array($v3 === array('limitenergie', 'netzladegrenze', 'smartcostlimit') && !$falsch,
+                 'Vorlage: <v.3> genau bei smartcostlimit, limitenergie, netzladegrenze; Ladeplan <v>, sonst <v.0>');
+
+    // 18: Fahrzeugwahl je Fahrzeug
+    $fz = ev_fahrzeug_befehle(array('Auto A', 'db:1', 'Zoe'));
+    $f[] = array($fz === array(array(1, 'Auto A'), array(3, 'Zoe'))
+                 && ev_befehl_titel('fahrzeug', 1, 3) === 'EVCC_SET_FAHRZEUG_3_LP1'
+                 && ev_befehl_titel('modus', 1) === 'EVCC_SET_MODUS_LP1',
+                 'Fahrzeugwahl: je gueltigem Namen ein Befehl EVCC_SET_FAHRZEUG_<N>_LP<n>, N wie die Fahrzeugreihenfolge');
+    return $f;
 }
 
 /* ==================================================================

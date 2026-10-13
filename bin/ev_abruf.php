@@ -13,6 +13,9 @@
  *   ev_abruf.php cron     eine Minute lang im Takt abrufen (aus dem Cron)
  *   ev_abruf.php einmal   genau ein Abruf, dann Schluss
  *   ev_abruf.php test     ein Abruf mit Klartextausgabe
+ *   ev_abruf.php --selbsttest   Befehlsbremse samt Nachreichen an festen
+ *                         Faellen durchrechnen (ohne Datei, Netz und
+ *                         Konfiguration; seit 0.9.43)
  *   ev_abruf.php --mqtt-leeren   die zurueckbehaltenen MQTT-Themen der Linie
  *                         leeren (fuer uninstall/uninstall, seit 0.9.33)
  *
@@ -84,6 +87,23 @@ if ($ev_lib === '') {
 }
 require_once $ev_lib;
 
+/* Selbsttest (seit 0.9.43): rechnet die Befehlsbremse samt Nachreichen und die
+ * Vorlagen-Helfer fuer <v.3> und die Fahrzeugwahl an festen Faellen durch
+ * (ev_bremse_selbsttest() in ev_lib.php). Ohne Datei, ohne Netz, ohne
+ * Konfiguration - deshalb VOR der Lagepruefung unten: er laeuft auch aus dem
+ * ausgepackten Archiv und schreibt nirgends hin. Ausgabe in der
+ * Rechenkern-Form, die Werkzeuge/freigabe_pruefen.py auswertet. */
+if (isset($argv[1]) && $argv[1] === '--selbsttest') {
+    $ev_st = ev_bremse_selbsttest();
+    $ev_st_fehl = 0;
+    foreach ($ev_st as $ev_st_f) {
+        echo ($ev_st_f[0] ? '[OK]   ' : '[FEHL] ') . $ev_st_f[1] . "\n";
+        if (!$ev_st_f[0]) { $ev_st_fehl++; }
+    }
+    printf("%d Faelle geprueft, %d Fehlschlaege.\n", count($ev_st), $ev_st_fehl);
+    exit($ev_st_fehl ? 1 : 0);
+}
+
 /* Ohne installierte Lage NICHTS tun (seit 0.9.33).
  *
  * Bis 0.9.32 lief dieses Programm aus einem ausgepackten Archiv einfach los:
@@ -122,8 +142,18 @@ if ($modus === '--mqtt-leeren') {
 
 /** Ein Durchlauf: holen, umrechnen, veroeffentlichen. */
 /* Nr. 36 b: $ansage - Ansage bei Stoerung und Ladeende (cron und einmal; nicht im Modus test). */
-function ev_durchlauf($laut = false, $ansage = false)
+/* $nachreichen (seit 0.9.43): vor dem Abruf gemerkte, von der Befehlsbremse
+ * abgewiesene Werte nachreichen (ev_bremse_nachreichen(); cron und einmal, nicht
+ * im Modus test). Ein Fehler darin haelt den Abruf nicht an. */
+function ev_durchlauf($laut = false, $ansage = false, $nachreichen = false)
 {
+    if ($nachreichen) {
+        try {
+            ev_bremse_nachreichen();
+        } catch (Throwable $ev_ne) {
+            ev_log_wenn_neu('nachreichen_fehler', 'Nachreichen: abgebrochen (' . get_class($ev_ne) . ').');
+        }
+    }
     $st = ev_state(true);
     /* Preisvorschau, Solarprognose und Statistik nachziehen.
      *
@@ -189,7 +219,7 @@ if ($modus === 'test') {
 }
 
 if ($modus !== 'cron') {
-    exit(ev_durchlauf(false, true) ? 0 : 1);
+    exit(ev_durchlauf(false, true, true) ? 0 : 1);
 }
 
 /* ---- Cron-Betrieb ---- */
@@ -253,7 +283,7 @@ $ende = time() + 58;   // zwei Sekunden Luft bis zum naechsten Cron-Lauf
 
 do {
     $beginn = microtime(true);
-    ev_durchlauf(false, true);
+    ev_durchlauf(false, true, true);
     $rest = $takt - (microtime(true) - $beginn);
     if (time() + $takt > $ende) { break; }
     if ($rest > 0) { usleep((int) ($rest * 1000000)); }
