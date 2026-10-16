@@ -9,6 +9,15 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.44
+
+* **Einbindung in Loxone:** Eingang En der Analogwertvalidierung (#21 „LoxBerry antwortet nicht“ auf der
+  Seite „EVCC“) nicht negieren (Hinweis im Kasten „So übernehmen Sie diese Seite“ und neues Bild). Config
+  legt den Eingang negiert an; die Konstante 1 (#20) kam dann als 0 an, und ohne diese Korrektur löste die
+  Ausfallmeldung nie aus. Wer die Seite schon gebaut hat: im Eigenschaftsfenster der Analogwertvalidierung
+  unter Parameter den Haken bei „En“ entfernen.
+* Gerendert unter PHP 7.4, 8.4 und 8.5, nicht am Gerät angesehen.
+
 ## Neu in 0.9.43
 
 Vollausstattung aus dem [LoxBerry-Plugins Musterprojekt](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt): Der Reiter „Einbindung in
