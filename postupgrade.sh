@@ -81,14 +81,24 @@ if [ ! -d "$SICHER" ] && [ -d "/tmp/${PDIR}_upgrade" ]; then
     SICHER="/tmp/${PDIR}_upgrade"
 fi
 
+# Jede Datei der Sicherung muss im Ziel bytegleich vorhanden sein.
+ev_sicherung_gleich() {
+    ( cd "$1" 2>/dev/null && find . -type f ) | while IFS= read -r ev_f; do
+        cmp -s "$1/$ev_f" "$2/$ev_f" || exit 1
+    done
+}
+
 if [ -d "$SICHER" ] && [ -n "$(ls -A "$SICHER" 2>/dev/null)" ]; then
     echo "<INFO> Stelle die Konfiguration zurueck"
     mkdir -p "$BASE/config/plugins/$PDIR"
     # Erst pruefen, dann die Sicherung loeschen. Bis 0.9.31 hiess es
     # unbedingt "zurueckgestellt", und danach war die Sicherung weg - auch
     # wenn cp gescheitert war. Jetzt bleibt sie in diesem Fall liegen.
+    # Nur die Dateien der Sicherung vergleichen (0.9.47): Seit 0.9.45 legt der
+    # Installer config/mqtt_subscriptions.cfg zusaetzlich an; "diff -r" ueber
+    # den ganzen Ordner meldete deshalb ein Scheitern, obwohl alles kopiert war.
     if cp -a "$SICHER/." "$BASE/config/plugins/$PDIR/" \
-       && diff -r "$SICHER" "$BASE/config/plugins/$PDIR" >/dev/null 2>&1; then
+       && ev_sicherung_gleich "$SICHER" "$BASE/config/plugins/$PDIR"; then
         chmod 0600 "$BASE/config/plugins/$PDIR/evcc.json" 2>/dev/null
         # Sperrdatei der Tokenerzeugung nicht mitschleppen.
         rm -f "$BASE/config/plugins/$PDIR/.token.lock"
