@@ -9,6 +9,10 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.46
+
+Die Baustein-Listen und die Namenstabelle nennen bei `lp1_plan_aktiv` und `lp1_smartcost_aktiv` auch 0 und −1 (EVCC liefert keinen Wert), und der Status „Ladeplan“ prüft `V1 <= 0`, damit −1 nicht mehr als „Ladeplan aktiv“ erscheint.
+
 ## Neu in 0.9.45
 
 Werte und Befehle über MQTT – der Weg des [LoxBerry-Plugins Musterprojekts](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt).
