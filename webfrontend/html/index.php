@@ -133,7 +133,9 @@ function ev_anrufer()
         : '?';
 }
 
-function ev_ende($code, $text)
+/* $fertig (seit 0.9.45): die Zeile kommt fertig aus ev_befehl_ausfuehren() (Zusatz der Wache und PROBE=1 stehen
+ * schon darin) - dann nur noch Code, Protokoll und Ausgabe wie bisher. */
+function ev_ende($code, $text, $fertig = false)
 {
     http_response_code($code);
     // Die Antwort ist EINE Zeile - Loxone liest sie mit einer
@@ -149,12 +151,12 @@ function ev_ende($code, $text)
     /* Schreiber-Wache (Energie-1 C1): jede Antwort NACH der Wache traegt ihren
      * Zusatz (;SCHREIBER=n, ;WACHE=MERKER) - auch UNVERAENDERT, 429 und 502. Mit
      * einem Schreiber ist er leer, die Zeile also wie bisher. */
-    if (isset($GLOBALS['ev_wz']) && is_string($GLOBALS['ev_wz']) && $GLOBALS['ev_wz'] !== '') {
+    if (!$fertig && isset($GLOBALS['ev_wz']) && is_string($GLOBALS['ev_wz']) && $GLOBALS['ev_wz'] !== '') {
         $text = rtrim($text) . $GLOBALS['ev_wz'];
     }
     /* Ein Trockenlauf (EVCC-b1) sagt es in JEDER Antwort, auch in einer
      * Abweisung - gleich hinter OK, damit es nicht hinter einem Grund steht. */
-    if (!empty($GLOBALS['ev_probe'])) {
+    if (!$fertig && !empty($GLOBALS['ev_probe'])) {
         $text = preg_replace('/^EVCC;OK=([01])/', 'EVCC;OK=$1;PROBE=1', $text, 1);
     }
     /* Jede Abweisung hinterlaesst eine Zeile.
@@ -178,43 +180,8 @@ function ev_ende($code, $text)
     exit;
 }
 
-/**
- * Schreiber-Wache (Energie-1 C1, Entscheidung Nr. 25; Kopf der Funktionen in
- * ev_lib.php): merken und melden, und nur mit "Fremde Schreiber abweisen" einen
- * Befehl eines nicht erlaubten Schreibers mit 409 abweisen, bevor die Bremse ihn
- * sieht und bevor etwas an EVCC geht. Ruecknahmen nie (ev_wache_ruecknahme()).
- * Der Trockenlauf merkt sich nichts, prueft die Sperre aber wie echt.
- * Rueckgabe: Zusatz fuer die Antwortzeile - ;SCHREIBER=n ab zwei Schreibern im
- * Fenster, ;WACHE=MERKER, wenn das Merken nicht ging (der Befehl geht trotzdem).
- */
-function ev_wache_anwenden($aktion, $klar, $von, $probe)
-{
-    $w = ev_wache_einstellungen(ev_config(false));
-    $ip = ev_wache_absender();
-    list($aktiv, $erlaubt, $fehler) = ev_wache_sperre_urteil($w, $von, $ip);
-    if ($fehler !== '') {
-        ev_log_wenn_neu('wache_liste', 'Fremde Schreiber abweisen ist eingeschaltet, aber die Liste der '
-            . 'erlaubten Schreiber ist leer oder unbrauchbar - die Sperre wirkt NICHT, bis die Liste im Reiter '
-            . 'Einstellungen berichtigt ist.');
-    } elseif ($w['wache_sperren_ein'] === 1 && is_file(ev_tmpdir() . '/letzte_wache_liste.txt')) {
-        ev_log_wenn_neu('wache_liste', 'Die Liste der erlaubten Schreiber ist brauchbar, die Sperre wirkt.');
-    }
-    $abweisen = $aktiv && !$erlaubt && !ev_wache_ruecknahme($aktion, $klar);
-    $zusatz = '';
-    if (!$probe && $w['wache_ein'] === 1) {
-        $m = ev_wache_merken($von, $ip, $aktion, $abweisen, $w);
-        if ($m['anzahl'] > 1) {
-            $zusatz .= ';SCHREIBER=' . (int) $m['anzahl'];
-        }
-        if (!$m['merker']) {
-            $zusatz .= ';WACHE=MERKER';
-        }
-    }
-    if ($abweisen) {
-        ev_ende(409, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=FREMDSCHREIBER');
-    }
-    return $zusatz;
-}
+/* Die Schreiber-Wache (ev_wache_anwenden()) steht seit 0.9.45 in ev_lib.php - sie gehoert zur
+ * Befehlsverarbeitung ev_befehl_ausfuehren(), die auch die Befehlsbruecke ruft (Gruppe 4 / MQTT). */
 
 /* VOR der Tokenpruefung wird nichts angelegt.
  *
@@ -406,8 +373,9 @@ if ($aktion === 'wert') {
     }
     $ev_felder = ev_felder();
     $ev_w = $werte[$feld]['wert'];
-    if (!empty($werte[$feld]['ohne']) && isset($ev_felder[$feld]) && ev_ohne_minus1($feld, $ev_felder[$feld])) {
-        $ev_w = -1;       // keine Aussage (C5, Nr. 5/8)
+    if (!empty($werte[$feld]['ohne']) && isset($ev_felder[$feld])
+        && ($ev_ow = ev_ohne_wert($feld, $ev_felder[$feld], 'http')) !== null) {
+        $ev_w = $ev_ow;   // keine Aussage (C5, Nr. 5/8; seit 0.9.45 auch -999, Entwurf ev 2.3)
     }
     echo $ev_w . "\n";
     exit;
@@ -422,276 +390,15 @@ if ($aktion === 'status') {
 
 /* ================= Schreibende Aktionen ================= */
 
-if (empty($cfg['steuerung_ein'])) {
-    ev_ende(403, "EVCC;OK=0;GRUND=STEUERUNG_AUS\n"
-                 . 'Schreibende Befehle sind gesperrt. Reiter Einstellungen, '
-                 . 'Haken "Steuerung aus Loxone zulassen".');
-}
-
-$b = $befehle[$aktion];
-
-/* Schreiber-Wache (Energie-1 C1): &von= lesen. Fehlt es: '' (ohne Kennung). Eine
- * Kennung, die nicht ins Muster passt (1..32 aus A-Z a-z 0-9 _ -), wird abgewiesen
- * wie ein falscher Wert - abweisen statt zurechtbiegen (Nr. 19); ein Tippfehler
- * faellt beim Einrichten auf. Eine Adresse OHNE von geht immer. */
-$ev_von = '';
-if (isset($_GET['von'])) {
-    $ev_von = is_string($_GET['von']) ? (string) $_GET['von'] : '';
-    if (!ev_wache_kennung_gueltig($ev_von)) {
-        ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=VON;ERLAUBT=A-Z,a-z,0-9,_,-;LAENGE=1..32');
-    }
-}
-
-/* Ladepunkt pruefen - aber nur, wo einer gebraucht wird.
- *
- * Streng seit 0.9.34 (C9): lp=1abc wurde bis 0.9.33 per (int) zu Ladepunkt 1
- * und der Befehl ging hinaus (Pruefbericht code, Befund 9). Jetzt nur eine
- * Zahl aus Ziffern; ohne Angabe bleibt es bei Ladepunkt 1. */
-$lp = 1;
-if (isset($_GET['lp'])) {
-    $ev_lp_roh = is_string($_GET['lp']) ? (string) $_GET['lp'] : '';
-    if (!preg_match('/^[0-9]{1,2}\z/', $ev_lp_roh)) {
-        ev_ende(400, 'EVCC;OK=0;GRUND=LADEPUNKT_UNGUELTIG;ERLAUBT=1..' . EV_LADEPUNKTE);
-    }
-    $lp = (int) $ev_lp_roh;
-}
-if ($b['ebene'] === 'lp' && ($lp < 1 || $lp > EV_LADEPUNKTE)) {
-    ev_ende(400, 'EVCC;OK=0;GRUND=LADEPUNKT_UNGUELTIG;ERLAUBT=1..' . EV_LADEPUNKTE);
-}
-
-/* Wert pruefen. Die Regel steht in ev_befehle(), nicht hier - so kann sie
- * nicht zwischen Endpunkt, Oberflaeche und Vorlage auseinanderlaufen. */
-$wert = (isset($_GET['wert']) && is_string($_GET['wert']))
-        ? trim((string) $_GET['wert']) : '';
-if ($b['pruef'] !== 'ohne' && $wert === '') {
-    ev_ende(400, 'EVCC;OK=0;GRUND=WERT_FEHLT');
-}
-list($ok, $klar) = ev_befehl_pruefen($b, $wert);
-if (!$ok) {
-    ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=' . $klar);
-}
-
-/* Der Ladeplan braucht zusaetzlich eine Zeit. Loxone kann keine ISO-Zeit
- * bilden, deshalb wird sie als VORLAUF IN STUNDEN uebergeben und hier
- * gerechnet - das ist die Zahl, die ein Loxone-Baustein ohnehin hat. */
-$zeit = '';
-$std = '';
-if ($b['pruef'] === 'plan') {
-        $std = (isset($_GET['stunden']) && is_string($_GET['stunden']))
-           ? str_replace(',', '.', (string) $_GET['stunden']) : '';
-    if (!is_numeric($std)) {
-        ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=STUNDEN_FEHLT;ERLAUBT=0.25..168');
-    }
-    $std = (float) $std;
-    if ($std < 0.25 || $std > 168) {
-        ev_ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BEREICH;FELD=stunden;ERLAUBT=0.25..168');
-    }
-    $zeit = gmdate('Y-m-d\TH:i:s\Z', time() + (int) round($std * 3600));
-}
-
-/* ---------------- Schreiber-Wache (Energie-1 C1) ----------------
- *
- * VOR der Bremse: auch ein Befehl, den die Bremse als unveraendert beantwortet,
- * kommt von einem Schreiber. Die Bremse selbst bleibt, wie sie war. */
-$ev_wz = ev_wache_anwenden($aktion, $klar, $ev_von, $ev_probe);
-
-/* ---------------- Befehlsbremse (C3, seit 0.9.34) ----------------
- *
- * Regeln/03: jeder Ausloeser, den eine fremde Anlage bedient, braucht eine
- * Bremse im Plugin. Bis 0.9.33 schaltete ein flatternder Loxone-Ausgang die
- * Phasenumschaltung im Takt der Anfragen - 20 POST an EVCC in unter einer
- * Sekunde (Pruefbericht code, Befund 3). Jetzt je Befehl und Ladepunkt:
- *   - derselbe Wert innerhalb von 60 s geht nicht erneut hinaus
- *     (200, UNVERAENDERT=1);
- *   - ein anderer Wert hoechstens alle 10 s (429, GRUND=BREMSE, WARTEN_S);
- *   - ist die Merkerdatei nicht zu oeffnen, faellt die Bremse geschlossen
- *     aus: 503 und eine Protokollzeile.
- * Seit 0.9.43 (Hausherr 13.10.2026) wird ein mit 429 abgewiesener Wert nicht
- * mehr verworfen: der Merker haelt ihn am Eintrag des Befehls fest (Antwort
- * ;NACHREICHEN=1), und der Abrufdienst reicht ihn nach Ablauf der Sperre nach -
- * je Befehl und Ladepunkt nur den letzten (ev_bremse_urteil(),
- * ev_bremse_nachreichen() in ev_lib.php). Grenzen dort als Konstanten.
- * Die Sperre bleibt bis zum Ende des Befehls gehalten; zwei gleichzeitige
- * Befehle laufen damit nacheinander, nicht ueber einander. */
-$ev_bremse = ev_tmpdir() . '/befehlsbremse.json';
-/* Im Trockenlauf (EVCC-b1) wird der Merker nur gelesen: fehlt er, ist nichts
- * gebremst, und er wird NICHT angelegt ($ev_bfh = null). Was den echten
- * Befehl mit 503 abweisen wuerde - an seiner Stelle liegt keine Datei, oder
- * er liesse sich nicht anlegen -, weist auch den Trockenlauf ab. */
-if ($ev_probe) {
-    clearstatcache(true, $ev_bremse);
-    if (!file_exists($ev_bremse)) {
-        $ev_bfh = is_writable(dirname($ev_bremse)) ? null : false;
-    } elseif (!is_file($ev_bremse)) {
-        $ev_bfh = false;
-    } else {
-        $ev_bfh = @fopen($ev_bremse, 'r');
-    }
-    $ev_bsperre = LOCK_SH;
-} else {
-    $ev_bfh = @fopen($ev_bremse, 'c+');
-    $ev_bsperre = LOCK_EX;
-}
-if ($ev_bfh === false || ($ev_bfh !== null && !@flock($ev_bfh, $ev_bsperre))) {
-    ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') laesst sich '
-        . 'nicht oeffnen - schreibende Befehle werden mit 503 abgewiesen, bis das behoben ist. '
-        . 'Pruefen: Platz und Eigentuemer (loxberry).');
-    ev_ende(503, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BREMSE_MERKER');
-}
-$ev_bm = ($ev_bfh === null) ? array() : json_decode((string) stream_get_contents($ev_bfh), true);
-if (!is_array($ev_bm)) { $ev_bm = array(); }
-$ev_bschl = $aktion . '|' . ($b['ebene'] === 'lp' ? $lp : 0);
-$ev_bwert = $klar . ($b['pruef'] === 'plan' ? '|' . $std : '');
-/* Urteil und Nachreichen seit 0.9.43 in ev_bremse_urteil(): gleiche Grenzen und
- * Vergleiche wie bis 0.9.42 hier. Neu: im Fall 429 merkt sich der Merker den
- * Wert zum Nachreichen; UNVERAENDERT und ein durchgehender Wert streichen einen
- * gemerkten. Der Trockenlauf merkt sich nichts und schreibt nichts. */
-$ev_bm_vorher = $ev_bm;
-list($ev_burteil, $ev_bwarten, $ev_bgemerkt) = ev_bremse_urteil($ev_bm, $ev_bschl, $ev_bwert, time(),
-    $ev_probe ? null : array('a' => $aktion, 'lp' => $lp, 'k' => $klar, 's' => $std, 'von' => $ev_von));
-if (!$ev_probe && $ev_bm !== $ev_bm_vorher && !ev_bremse_schreiben($ev_bfh, $ev_bm)) {
-    ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') liess sich '
-        . 'nicht schreiben - ein abgewiesener Wert wird nicht nachgereicht.');
-    $ev_bgemerkt = false;
-}
-if ($ev_burteil === 'unveraendert') {
-    ev_ende(200, 'EVCC;OK=1;AKTION=' . $aktion . ';WERT=' . $klar . ';UNVERAENDERT=1');
-}
-if ($ev_burteil === 'gebremst') {
-    ev_ende(429, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BREMSE;WARTEN_S=' . $ev_bwarten
-        . ($ev_bgemerkt ? ';NACHREICHEN=1' : ''));
-}
-
-/* ---------------- Ladeplan aus zwei Ausgaengen (C11, seit 0.9.34) ----------------
- *
- * In Loxone ist <v.N> derselbe Analogwert mit N Nachkommastellen; der alte
- * Befehl 'plansoc' mit wert=<v.0>&stunden=<v.1> haette das Ziel 80 % in 80 h
- * gesetzt (Pruefbericht oberflaeche, Befund 13). Ziel und Vorlauf kommen jetzt
- * je aus einem eigenen Ausgang; das Plugin merkt sich beide je Ladepunkt und
- * sendet den Plan, sobald beide bekannt sind - mit dem Vorlauf ab JETZT. */
-if ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') {
-    $ev_plan = ev_tmpdir() . '/ladeplan.json';
-    $ev_teil = ($b['pruef'] === 'planziel') ? 'ziel' : 'stunden';
-    if ($ev_probe) {
-        /* Trockenlauf (EVCC-b1): der Merker wird nur gelesen; der neue Teil
-         * zaehlt nur fuer diese Antwort. */
-        clearstatcache(true, $ev_plan);
-        if (file_exists($ev_plan) && !is_file($ev_plan)) {
-            ev_ende(503, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=PLAN_MERKER');
-        }
-        $ev_pm = is_file($ev_plan) ? json_decode((string) @file_get_contents($ev_plan), true) : array();
-        if (!is_array($ev_pm)) { $ev_pm = array(); }
-        $ev_pm[(string) $lp][$ev_teil] = $klar;
-    } else {
-        $ev_pfh = @fopen($ev_plan, 'c+');
-        if ($ev_pfh === false || !@flock($ev_pfh, LOCK_EX)) {
-            ev_log_wenn_neu('ladeplan', 'Die Merkerdatei des Ladeplans (' . $ev_plan . ') laesst sich '
-                . 'nicht oeffnen - der Ladeplan wird nicht gesetzt.');
-            ev_ende(503, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=PLAN_MERKER');
-        }
-        $ev_pm = json_decode((string) stream_get_contents($ev_pfh), true);
-        if (!is_array($ev_pm)) { $ev_pm = array(); }
-        $ev_pm[(string) $lp][$ev_teil] = $klar;
-        ftruncate($ev_pfh, 0);
-        rewind($ev_pfh);
-        fwrite($ev_pfh, (string) json_encode($ev_pm));
-        fflush($ev_pfh);
-        flock($ev_pfh, LOCK_UN);
-        fclose($ev_pfh);
-    }
-    $ev_z = isset($ev_pm[(string) $lp]['ziel']) ? (string) $ev_pm[(string) $lp]['ziel'] : '';
-    $ev_s = isset($ev_pm[(string) $lp]['stunden']) ? (string) $ev_pm[(string) $lp]['stunden'] : '';
-    if ($ev_z === '' || $ev_s === '') {
-        /* Im Trockenlauf ist nichts gemerkt: GEMERKT=0. */
-        ev_ende(200, 'EVCC;OK=1;AKTION=' . $aktion . ';WERT=' . $klar . ';GEMERKT=' . ($ev_probe ? '0' : '1')
-            . ';FEHLT=' . ($ev_z === '' ? 'plansoc_ziel' : 'plansoc_stunden'));
-    }
-    $zeit = gmdate('Y-m-d\\TH:i:s\\Z', time() + (int) round((float) $ev_s * 3600));
-    $pfad = str_replace(array('%LP%', '%WERT%', '%ZEIT%'),
-        array((string) $lp, rawurlencode($ev_z), rawurlencode($zeit)), $b['pfad']);
-} else {
-    $pfad = str_replace(
-        array('%LP%', '%WERT%', '%ZEIT%'),
-        array((string) $lp, rawurlencode($klar), rawurlencode($zeit)),
-        $b['pfad']);
-}
-
-/* Wurde die Eingabe gerundet? Dann wird es GESAGT.
- *
- * Loxone sendet aus einem Analogbaustein zwangslaeufig Kommazahlen. Ein
- * ganzzahliger Befehl muss sie runden - bis 0.9.28 tat er das STILL.
- * Gemessen am 10.09.2026: limitsoc=50.5 ging als
- * /api/loadpoints/1/limitsoc/51 hinaus, in der Antwort stand nur WERT=51.
- * Abgewiesen wird hier mit Absicht nicht (das machte den Befehl fuer Loxone
- * unbenutzbar), aber CLAUDE.md Abschnitt 4 verlangt, dass nichts still
- * zurechtgebogen wird.
- *
- * Nur fuer die Befehlsarten, bei denen $klar wirklich dieselbe Zahl ist:
- * bei 'modus' und 'schalter' ist $klar eine Uebersetzung ('3' -> 'pv'), da
- * waere ein GERUNDET= irrefuehrend.
- *
- * Seit dem Verbesserungsbau 30.09.2026 steht das VOR dem Senden: die
- * Antwortzeile ist fuer den echten Befehl und den Trockenlauf dieselbe
- * (EVCC-b1), der Trockenlauf traegt nur PROBE=1 dazu. */
-$gerundet = '';
-if (in_array($b['pruef'], array('ganz', 'plan', 'liste', 'planziel'), true)
-    && is_numeric(str_replace(',', '.', $wert))
-    && (string) $klar !== (string) $wert) {
-    $gerundet = ';GERUNDET=' . str_replace(';', ',', $wert);
-}
-$ev_pz = $ev_probe ? 'PROBE=1;' : '';
-if ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') {
-    // Der Ladeplan nennt beide Teile, aus denen er entstand (C11).
-    $ev_antwort = sprintf("EVCC;OK=1;%sAKTION=%s;WERT=%s%s;ZIEL=%s;STUNDEN=%s;ZEIT=%s\n", $ev_pz, $aktion,
-                          $klar, $gerundet, $ev_z, $ev_s, $zeit);
-} else {
-    $ev_antwort = sprintf("EVCC;OK=1;%sAKTION=%s;WERT=%s%s%s\n", $ev_pz, $aktion, $klar,
-                          $gerundet, $zeit !== '' ? ';ZEIT=' . $zeit : '');
-}
-
-// Schreiber-Wache (Energie-1 C1): ;SCHREIBER=n / ;WACHE=MERKER hinten an.
-$ev_antwort = rtrim($ev_antwort, "\n") . $ev_wz . "\n";
-
-/* Der Trockenlauf endet hier (EVCC-b1): nichts an EVCC, der Bremsmerker
- * bleibt, wie er war, der Zwischenspeicher auch. */
-if ($ev_probe) {
-    if (is_resource($ev_bfh)) {
-        flock($ev_bfh, LOCK_UN);
-        fclose($ev_bfh);
-    }
-    ev_log_wenn_neu('probe', 'Trockenlauf ' . $aktion . ' (' . $klar . ') fuer '
-        . ($b['ebene'] === 'lp' ? 'Ladepunkt ' . $lp : 'die Anlage')
-        . ' von ' . ev_anrufer() . ' geprueft - nichts gesendet.');
-    echo $ev_antwort;
-    exit;
-}
-
-$a = ev_http($pfad, $b['methode']);
-if (!$a['ok']) {
-    ev_log('Befehl ' . $aktion . ' (' . $klar . ') an ' . $pfad . ' FEHLGESCHLAGEN: ' . $a['fehler']);
-    /* Ein Befehl aus der Dokumentation, den EVCC nicht kennt, sieht in der
-     * Antwort anders aus als ein Netzfehler - sonst sucht man den Fehler bei
-     * der Verkabelung, wo er beim Pfad liegt. */
-    $zusatz = '';
-    if ($b['quelle'] === 'doku' && (int) $a['code'] === 404) {
-        $zusatz = ';HINWEIS=Dieser Befehl stammt aus der EVCC-Dokumentation und ist an keiner '
-                . 'Anlage gemessen. Ihre EVCC-Fassung kennt den Pfad ' . $b['pfad'] . ' nicht.';
-    }
-    ev_ende(502, 'EVCC;OK=0;AKTION=' . $aktion . ';CODE=' . (int) $a['code']
-                 . ';GRUND=' . str_replace(';', ',', (string) $a['fehler']) . $zusatz);
-}
-ev_log('Befehl ' . $aktion . ' (' . $klar . ') an '
-     . ($b['ebene'] === 'lp' ? 'Ladepunkt ' . $lp : 'die Anlage') . ' gesendet');
-/* Die Bremse merkt sich den GESENDETEN Wert (C3). Scheitert das Schreiben,
- * wirkt der Befehl trotzdem - aber das steht im Protokoll. */
-$ev_bm[$ev_bschl] = array('w' => $ev_bwert, 't' => time());
-if (!(ftruncate($ev_bfh, 0) && rewind($ev_bfh)
-      && fwrite($ev_bfh, (string) json_encode($ev_bm)) !== false && fflush($ev_bfh))) {
-    ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') liess sich '
-        . 'nicht schreiben - die Bremse erkennt den letzten Befehl nicht.');
-}
-flock($ev_bfh, LOCK_UN);
-fclose($ev_bfh);
-// Der zwischengespeicherte Zustand ist jetzt veraltet.
-@unlink(ev_tmpdir() . '/state.json');
-echo $ev_antwort;
+/* Gruppe 4 / MQTT (0.9.45; Entwurf ev 3.2, Bauvorschrift Gruppe 4): die Befehlsverarbeitung steht in
+ * ev_befehl_ausfuehren() (ev_lib.php) - dieselbe Funktion ruft die Befehlsbruecke (bin/befehle_zuordnung.php,
+ * Quelle 'mqtt'). Haken "Steuerung aus Loxone zulassen", von=, lp=, Wert, Ladeplan, Schreiber-Wache,
+ * Befehlsbremse samt Nachreichen, GERUNDET, Trockenlauf und Senden wie bis 0.9.44 hier; Antwort, Code und
+ * Protokoll unveraendert (Wirkungstest Quelle gegen Bau). Das Token prueft weiter nur dieser Endpunkt. */
+list($ev_bc, $ev_bz) = ev_befehl_ausfuehren($aktion, array(
+    'lp' => isset($_GET['lp']) ? $_GET['lp'] : null,
+    'wert' => isset($_GET['wert']) ? $_GET['wert'] : null,
+    'stunden' => isset($_GET['stunden']) ? $_GET['stunden'] : null,
+    'von' => isset($_GET['von']) ? $_GET['von'] : null,
+    'ip' => ev_wache_absender(), 'probe' => $ev_probe, 'anrufer' => ev_anrufer()), 'http');
+ev_ende($ev_bc, $ev_bz, true);

@@ -82,6 +82,14 @@ if ! touch "$EV_MARKE" 2>/dev/null; then
 fi
 trap 'ev_rc=$?; if [ "$ev_rc" = "2" ] && [ "$EV_MARKE_VORHER" = "0" ]; then rm -f "$EV_MARKE"; fi' EXIT
 
+# Gruppe 4 / MQTT (0.9.45): die Befehlsbruecke anhalten. Die Marke liegt schon (oben) - der Waechter im
+# Minutentakt startet sie bis postupgrade.sh nicht neu; es ist dieselbe Marke, die befehlsbruecke.sh liest.
+# Bis 0.9.44 gab es keine Bruecke (dann fehlt die Datei).
+BBSH="$BASE/bin/plugins/$PDIR/befehlsbruecke.sh"
+if [ -f "$BBSH" ]; then
+    echo "<INFO> Befehlsbruecke: $(timeout 40 bash "$BBSH" stop 2>&1 | head -n 1)"
+fi
+
 # Die Sicherung liegt BEWUSST NICHT unter /tmp.
 #
 # Auf dem LoxBerry ist /tmp eine Ramdisk. Zwischen preupgrade und postupgrade

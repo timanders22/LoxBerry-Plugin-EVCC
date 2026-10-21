@@ -420,6 +420,14 @@ function ev_pruefungen()
             sprintf(ev_t('TEST.A_MQTT_OK'), (int) $m['udpport'], ev_e($cfg['mqtt_topic'])));
     }
 
+    /* ---- Gruppe 4 / MQTT (0.9.45): Namenstabelle und Befehlsbruecke ----
+     * Die Namen der Einbindung in Loxone gegen die gesendeten Themen (Entwurf ev 2.4); die Bruecke gemessen am
+     * Erzeugnis wie im Waechter. Aus (Haken) ist ein Hinweis, kein Kreuz. */
+    list($ev_nok, $ev_ntext) = ev_mqtt_namen_probe();
+    $z[] = ev_pruefzeile($ev_nok, ev_t('TEST.F_NAMEN'), $ev_ntext);
+    list($ev_bok, $ev_btext) = ev_pruef_bruecke();
+    $z[] = ev_pruefzeile($ev_bok, ev_t('TEST.F_BRUECKE'), $ev_btext);
+
     /* ---- Token und Steuerung ---- */
     $ev_tok = (string) $cfg['aktionstoken'];
     if ($ev_tok === '') {

@@ -413,6 +413,9 @@ function ev_vorgaben()
         // 0 = kein Vollversand im Takt (nur bei Start, Pluginstart und
         // Praefixwechsel). Seit 0.9.33, Name wie im Abfahrts-Assistenten.
         'mqtt_vollsend_min' => 15,
+        // Gruppe 4 / MQTT (0.9.45): Befehle ueber MQTT annehmen (Befehlsbruecke), ab Werk aus. Der zweite
+        // Haken ist das vorhandene steuerung_ein (Entwurf ev E2).
+        'befehle_mqtt_ein' => 0,
         // Umfang
         'ladepunkte'     => 2,         // wie viele Ladepunkte ausgeben
         'fahrzeuge'      => 2,         // wie viele Fahrzeuge ausgeben
@@ -540,6 +543,7 @@ function ev_config($erzeugen = true)
     $cfg['fahrzeuge'] = max(0, min(EV_FAHRZEUGE, (int) $cfg['fahrzeuge']));
     $cfg['steuerung_ein'] = empty($cfg['steuerung_ein']) ? 0 : 1;
     $cfg['mqtt_ein'] = empty($cfg['mqtt_ein']) ? 0 : 1;
+    $cfg['befehle_mqtt_ein'] = empty($cfg['befehle_mqtt_ein']) ? 0 : 1;
     $cfg['tarife_ein'] = empty($cfg['tarife_ein']) ? 0 : 1;
     $cfg['update_ein'] = empty($cfg['update_ein']) ? 0 : 1;
     $cfg['mqtt_topic'] = preg_replace('#[^A-Za-z0-9_/\-]#', '', (string) $cfg['mqtt_topic']);
@@ -1230,29 +1234,29 @@ function ev_felder($ev_namen_vorgabe = null)
      * ist. Die Grenzen sind deshalb weit genug fuer beide Einheiten. */
     $f['prognose_heute'] = array(
         'pfade' => array('lox.prognose.heute'),
-        'typ' => 'komma3', 'analog' => 1, 'min' => 0, 'max' => 1000000, 'einheit' => '',
+        'typ' => 'komma3', 'analog' => 1, 'min' => -1, 'max' => 1000000, 'einheit' => '',
         'text' => 'FELD.PROGNOSE_HEUTE', 'mqtt' => '', 'quelle' => 'doku');
     $f['prognose_morgen'] = array(
         'pfade' => array('lox.prognose.morgen'),
-        'typ' => 'komma3', 'analog' => 1, 'min' => 0, 'max' => 1000000, 'einheit' => '',
+        'typ' => 'komma3', 'analog' => 1, 'min' => -1, 'max' => 1000000, 'einheit' => '',
         'text' => 'FELD.PROGNOSE_MORGEN', 'mqtt' => '', 'quelle' => 'doku');
     $f['prognose_uebermorgen'] = array(
         'pfade' => array('lox.prognose.uebermorgen'),
-        'typ' => 'komma3', 'analog' => 1, 'min' => 0, 'max' => 1000000, 'einheit' => '',
+        'typ' => 'komma3', 'analog' => 1, 'min' => -1, 'max' => 1000000, 'einheit' => '',
         'text' => 'FELD.PROGNOSE_UEBERMORGEN', 'mqtt' => '', 'quelle' => 'doku');
 
     if (!empty($cfg['tarife_ein'])) {
         $f['tarif_netz'] = array(
             'pfade' => array('tariffGrid'),
-            'typ' => 'komma3', 'analog' => 1, 'min' => -10, 'max' => 10, 'einheit' => '/kWh',
+            'typ' => 'komma3', 'analog' => 1, 'min' => -999, 'max' => 10, 'einheit' => '/kWh',
             'text' => 'FELD.TARIF_NETZ', 'mqtt' => 'evcc/site/tariffGrid');
         $f['tarif_einspeisung'] = array(
             'pfade' => array('tariffFeedIn'),
-            'typ' => 'komma3', 'analog' => 1, 'min' => -10, 'max' => 10, 'einheit' => '/kWh',
+            'typ' => 'komma3', 'analog' => 1, 'min' => -999, 'max' => 10, 'einheit' => '/kWh',
             'text' => 'FELD.TARIF_EINSPEISUNG', 'mqtt' => 'evcc/site/tariffFeedIn');
         $f['tarif_co2'] = array(
             'pfade' => array('tariffCo2'),
-            'typ' => 'zahl', 'analog' => 1, 'min' => 0, 'max' => 1000, 'einheit' => 'g/kWh',
+            'typ' => 'zahl', 'analog' => 1, 'min' => -1, 'max' => 1000, 'einheit' => 'g/kWh',
             'text' => 'FELD.TARIF_CO2', 'mqtt' => 'evcc/site/tariffCo2');
 
         /* ---- Preisvorschau (Vorschlag C6) ----
@@ -1268,15 +1272,15 @@ function ev_felder($ev_namen_vorgabe = null)
          * Vergleichsbaustein - ohne jede Preisautomatik in Loxone. */
         $f['preis_min_24h'] = array(
             'pfade' => array('lox.preis.min'),
-            'typ' => 'komma3', 'analog' => 1, 'min' => -10, 'max' => 10, 'einheit' => '/kWh',
+            'typ' => 'komma3', 'analog' => 1, 'min' => -999, 'max' => 10, 'einheit' => '/kWh',
             'text' => 'FELD.PREIS_MIN', 'mqtt' => '', 'quelle' => 'doku');
         $f['preis_max_24h'] = array(
             'pfade' => array('lox.preis.max'),
-            'typ' => 'komma3', 'analog' => 1, 'min' => -10, 'max' => 10, 'einheit' => '/kWh',
+            'typ' => 'komma3', 'analog' => 1, 'min' => -999, 'max' => 10, 'einheit' => '/kWh',
             'text' => 'FELD.PREIS_MAX', 'mqtt' => '', 'quelle' => 'doku');
         $f['preis_schnitt_24h'] = array(
             'pfade' => array('lox.preis.schnitt'),
-            'typ' => 'komma3', 'analog' => 1, 'min' => -10, 'max' => 10, 'einheit' => '/kWh',
+            'typ' => 'komma3', 'analog' => 1, 'min' => -999, 'max' => 10, 'einheit' => '/kWh',
             'text' => 'FELD.PREIS_SCHNITT', 'mqtt' => '', 'quelle' => 'doku');
         $f['preis_rang'] = array(
             'pfade' => array('lox.preis.rang'),
@@ -1378,7 +1382,7 @@ function ev_felder($ev_namen_vorgabe = null)
             'text' => 'FELD.LP_MAXSTROM', 'nr' => $i, 'mqtt' => $m . 'maxCurrent', 'quelle' => 'doku');
         $f[$lp . 'smartcost_grenze'] = array(
             'pfade' => array("loadpoints.$j.smartCostLimit"),
-            'typ' => 'komma3', 'analog' => 1, 'min' => -10, 'max' => 10, 'einheit' => '/kWh',
+            'typ' => 'komma3', 'analog' => 1, 'min' => -999, 'max' => 10, 'einheit' => '/kWh',
             'text' => 'FELD.LP_SMARTCOST_GRENZE', 'nr' => $i, 'mqtt' => $m . 'smartCostLimit', 'quelle' => 'doku');
         $f[$lp . 'batterieboost'] = array(
             'pfade' => array("loadpoints.$j.batteryBoost"),
@@ -1818,9 +1822,8 @@ function ev_werte($st = null)
         $u = ev_umrechnen($d['typ'], $w);
         /* 'ohne' = der Abruf lieferte das Feld nicht (M1, C5, seit 0.9.34).
          * 'wert' bleibt 0 wie bisher; was daraus wird, entscheiden die Ausgaben:
-         * die Statuszeile setzt fuer Zustaende und die Rangzahlen -1
-         * (ev_ohne_minus1()), MQTT sendet einen Zustand einmal als '-'
-         * retained (ev_mqtt_publish()). Nie eine erfundene 0 fuer einen Zustand. */
+         * seit 0.9.45 nach EINER Regel fuer MQTT und HTTP (ev_ohne_wert(): -1, -999,
+         * '-' oder die 0 der Messwerte). Nie eine erfundene 0 fuer einen Zustand. */
         $out[$name] = array('wert' => $u === null ? 0 : $u, 'pfad' => $pfad,
                             'ohne' => $u === null ? 1 : 0);
     }
@@ -1869,26 +1872,39 @@ function ev_werte($st = null)
 }
 
 /**
- * Bekommt ein Feld ohne Aussage in der Statuszeile -1 statt 0? (C5, M1, seit 0.9.34)
+ * Was geht ohne Aussage hinaus? (Gruppe 4 / MQTT, 0.9.45; Entwurf ev 2.3, ENTSCHEIDUNGEN Gruppe 4 Punkt 3)
  *
- * Nr. 5/8 der Entscheidungen: Zahlen ohne Aussage gehen als -1 hinaus, weil
- * Loxone ein '-' als 0 liest. Das gilt fuer
- *   - die Zustaende der Retain-Tabelle, die eine Zahl sind und deren
- *     Wertebereich -1 nicht enthaelt (Lademodus, Ladegrenzen, Prioritaet,
- *     Stromgrenzen, Ladeplan, Speicher-Ladestaende, Batteriemodus ...), und
- *   - die Rangzahlen der Preisvorschau (PREIS_RANG, PREIS_STUNDEN,
- *     PREIS_GUENSTIGSTE_STUNDE), Bauliste C1.
- * NICHT fuer Ja/Nein-Felder: ein Digitaleingang in Loxone kann -1 nicht
- * darstellen; dort sagen OK und BETRIEBSBEREIT, ob der Wert gilt. Und nicht
- * fuer Messwerte (Leistungen, Energien): 0 kW eines fehlenden Geraets ist
- * dort die gewohnte Auskunft, der Reiter Test nennt die fehlenden Felder.
+ * Bis 0.9.44 kannte die Vorgaengerin (ev_ohne_minus1) nur -1 fuer die Zeile; ueber MQTT ging ein Zustand
+ * einmal als '-' retained, die Rangzahlen als '-'. Jetzt EINE Regel fuer beide Wege. Rueckgabe: der Wert, der fuer
+ * ein Feld ohne Aussage (der Abruf gelang, lieferte das Feld aber nicht) hinausgeht, oder null = der Platzhalter 0
+ * bleibt. $weg 'mqtt' oder 'http' (Statuszeile, aktion=wert, Vorlage).
+ *   Zustaende ohne Vorzeichen (Lademodus, Ladegrenzen, Stroeme, Prioritaet, Plan, Speicher-Ladestaende,
+ *     Batteriemodus, Kapazitaet)                            -1 (MQTT und HTTP)
+ *   Zustaende mit Vorzeichen (residualleistung_w, lpN_smartcost_grenze)   -999 (G3: Vorzeichen -> -999)
+ *   Ja/Nein-Zustaende (verbunden, laedt, ...)              MQTT -1; HTTP 0 - die alte Vorlage legt fuer Ja/Nein
+ *                                                          DIGITALE Eingaenge an, dort hiesse -1 "an" (E3)
+ *   Preisrang, -stunden, guenstigste Stunde                -1
+ *   Preise (Tarife, Preisvorschau)                         -999 (0 je kWh waere ein glaubhafter, falscher Preis)
+ *   CO2 und Solarprognosen                                 -1
+ *   Texte (Fahrzeugname, letzter Fehler)                   MQTT "-"; nicht in der Zeile
+ *   Messwerte (Leistungen, Energien, Sitzung, Restzeiten)  0 - ein fehlendes Feld heisst dort "Geraet fehlt";
+ *                                                          -999 kW am Energiemanager gaebe Scheinueberschuss (E3)
  */
-function ev_ohne_minus1($name, $d)
+function ev_ohne_wert($name, $d, $weg = 'mqtt')
 {
-    if (in_array($name, array('preis_rang', 'preis_stunden', 'preis_guenstigste_stunde'), true)) {
-        return true;
+    $n = (string) $name;
+    if (isset($d['typ']) && $d['typ'] === 'text') { return $weg === 'mqtt' ? '-' : null; }
+    if (in_array($n, array('preis_rang', 'preis_stunden', 'preis_guenstigste_stunde', 'tarif_co2',
+                           'prognose_heute', 'prognose_morgen', 'prognose_uebermorgen'), true)) {
+        return -1;
     }
-    return ev_retain_fuer($name) && !empty($d['analog']) && (float) $d['min'] >= 0;
+    if (in_array($n, array('tarif_netz', 'tarif_einspeisung', 'preis_min_24h', 'preis_max_24h', 'preis_schnitt_24h'), true)) {
+        return -999;
+    }
+    if (!ev_retain_fuer($n)) { return null; }
+    if (isset($d['typ']) && $d['typ'] === 'bool') { return $weg === 'mqtt' ? -1 : null; }
+    if ($n === 'residualleistung_w' || preg_match('/^lp[0-9]+_smartcost_grenze\z/', $n)) { return -999; }
+    return -1;
 }
 
 /* ==================================================================
@@ -2240,12 +2256,16 @@ function ev_abo_text()
 {
     $m = ev_mqtt_zustand();
     $f = isset($m['fassung']) ? (int) $m['fassung'] : 0;
+    /* Gruppe 4 / MQTT (0.9.45, E6): das Plugin bringt sein Abo fuer Gateway V1 selbst mit
+     * (config/mqtt_subscriptions.cfg, ev_abo_datei()). */
+    list(, $ev_da) = ev_abo_datei(ev_config(false)['mqtt_topic']);
     if ($f <= 0) {
-        return ev_t('MQTT.ABO_UNBEKANNT');
+        return ev_t('MQTT.ABO_UNBEKANNT') . ($ev_da ? ' ' . ev_t('MQTT.ABO_MITGELIEFERT') : '');
     }
     $gemessen = ' <span class="sm-mono">'
               . sprintf(ev_t('MQTT.ABO_GEMESSEN'), $f) . '</span>';
-    return ev_t($f >= 2 ? 'MQTT.ABO_V2' : 'MQTT.ABO_WARNUNG') . $gemessen;
+    if ($f >= 2) { return ev_t('MQTT.ABO_V2') . $gemessen; }
+    return ev_t($ev_da ? 'MQTT.ABO_MITGELIEFERT' : 'MQTT.ABO_WARNUNG') . $gemessen;
 }
 
 
@@ -2976,6 +2996,11 @@ function ev_mqtt_publish($werte = null, $voll = false)
     $ev_alt = $voll ? array() : $ev_bisher;
     $ev_neu = $ev_alt;
     $ev_leben_neu = $ev_leben_bisher;
+    /* Gruppe 4 / MQTT (0.9.45, Entwurf ev 2.2 a): der Laufzaehler status/zaehler 0..999, +1 je Durchlauf; er
+     * steht in der Sendeliste und zaehlt auch ueber einen Praefixwechsel weiter. */
+    $ev_zl = (is_array($ev_liste) && isset($ev_liste['zaehler'])) ? (((int) $ev_liste['zaehler'] + 1) % 1000) : 0;
+    $ev_takt_bisher = ($ev_gleich && isset($ev_liste['takt']) && is_array($ev_liste['takt'])) ? $ev_liste['takt'] : array();
+    $ev_takt_neu = $ev_takt_bisher;
     $ev_leben = array_flip(ev_mqtt_lebenszeichen_liste());
     $ev_nicht = array_flip(ev_mqtt_nicht_senden());
     /* Datenstrom statt socket_create: socket_* steckt in php-sockets, das
@@ -3006,16 +3031,22 @@ function ev_mqtt_publish($werte = null, $voll = false)
         $ev_ohne = !empty($d['ohne']);
         $ev_retain = ev_retain_fuer($name);
         if ($ev_ohne && !$ev_antwort) { continue; }
-        if ($ev_ohne && $ev_retain) {
-            $nutz = '-';
+        /* Gruppe 4 / MQTT (0.9.45, Entwurf ev 2.3): ohne Aussage nach ev_ohne_wert() - Zustaende -1 bzw. -999
+         * retained (einmal genuegt, wie bis 0.9.44 das '-'), Preise -999, Rang, CO2 und Prognosen -1, Texte '-';
+         * Messwerte behalten die 0. */
+        $ev_ow = ($ev_ohne && isset($ev_felder[$name])) ? ev_ohne_wert($name, $ev_felder[$name], 'mqtt') : null;
+        if ($ev_ohne && $ev_retain && $ev_ow !== null) {
+            $nutz = (string) $ev_ow;
             $verb = 'retain';
-        } elseif ($ev_ohne && isset($ev_felder[$name]) && ev_ohne_minus1($name, $ev_felder[$name])) {
-            $nutz = '-';
+        } elseif ($ev_ow !== null) {
+            $nutz = (string) $ev_ow;
             $verb = 'publish';
         } else {
             /* Erst die Nutzlast, dann das Verb: eine leere Nutzlast LOESCHT
              * ein zurueckbehaltenes Thema, sie darf nie mit retain hinaus. */
             $nutz = ev_mqtt_nutzlast($d['wert']);
+            /* Ein leerer Text (kein Fehler, kein Fahrzeug) geht als '-' (Entwurf ev 2.3; bis 0.9.44 leer). */
+            if ($nutz === '' && isset($ev_felder[$name]) && $ev_felder[$name]['typ'] === 'text') { $nutz = '-'; }
             $verb = ($ev_antwort && ev_retain_fuer($name, $nutz)) ? 'retain' : 'publish';
         }
         $thema = ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $name);
@@ -3028,10 +3059,10 @@ function ev_mqtt_publish($werte = null, $voll = false)
                 || ($name !== 'ts' && (string) $lb['z'] !== $ev_zeile)
                 || ($name === 'ts' && $ev_leben_geht && (string) $lb['z'] !== $ev_zeile);
             if (!$faellig) { continue; }
-        } elseif ($ev_zeile === 'retain -' && isset($ev_bisher[$name])
-                  && (string) $ev_bisher[$name] === 'retain -') {
-            // '-' steht schon im Broker - einmal genuegt, auch im Vollversand.
-            $ev_neu[$name] = 'retain -';
+        } elseif ($ev_ohne && $ev_retain && isset($ev_bisher[$name])
+                  && (string) $ev_bisher[$name] === $ev_zeile) {
+            // -1/-999 steht schon im Broker - einmal genuegt, auch im Vollversand.
+            $ev_neu[$name] = $ev_zeile;
             continue;
         } elseif (!$voll && !isset($ev_weg[$name])
                   && isset($ev_alt[$name]) && (string) $ev_alt[$name] === $ev_zeile) {
@@ -3054,16 +3085,36 @@ function ev_mqtt_publish($werte = null, $voll = false)
             }
         }
     }
+    /* Gruppe 4 / MQTT (0.9.45, Entwurf ev 2.2 a): status/ok, status/ts und status/zaehler im 30-s-Abstand
+     * (EV_LEBEN_ABSTAND, ohne den Zweig "bei Aenderung sofort"), im Vollversand sofort, nie retained, auch ohne
+     * Antwort von EVCC. status/ok = ok, status/ts = Zeit dieses Durchlaufs. Bei einem Takt ueber 30 s je Durchlauf. */
+    if ($voll || !isset($ev_takt_bisher['t']) || ($ev_jetzt - (int) $ev_takt_bisher['t']) >= EV_LEBEN_ABSTAND
+            || (int) $ev_takt_bisher['t'] > $ev_jetzt) {
+        $ev_tw = array('status/ok' => (isset($werte['ok']['wert']) ? (int) $werte['ok']['wert'] : 0),
+                       'status/ts' => $ev_jetzt, 'status/zaehler' => $ev_zl);
+        $ev_tn = 0;
+        foreach (ev_mqtt_lebenszeichen_takt() as $ev_tt) {
+            $versucht++;
+            if ($senden('publish ' . ev_mqtt_thema($cfg['mqtt_topic'] . '/' . $ev_tt) . ' ' . (int) $ev_tw[$ev_tt])) {
+                $n++;
+                $ev_tn++;
+            }
+        }
+        if ($ev_tn > 0) { $ev_takt_neu = array('t' => $ev_jetzt); }
+    }
     fclose($sock);
     if ($n < $versucht) {
         ev_log_wenn_neu('mqtt_teil', sprintf('nur %d von %d Themen gesendet', $n, $versucht));
     }
-    if ($voll || $ev_neu !== $ev_alt || $ev_leben_neu !== $ev_leben_bisher) {
+    /* Seit 0.9.45 in jedem Lauf geschrieben: der Laufzaehler status/zaehler aendert sich immer (RAM-Scheibe). */
+    if (true) {
         $ev_js = json_encode(array(
             'kennung' => $ev_kennung,
             'voll' => $voll ? time() : (int) $ev_liste['voll'],
             'werte' => $ev_neu,
-            'leben' => $ev_leben_neu));
+            'leben' => $ev_leben_neu,
+            'zaehler' => $ev_zl,
+            'takt' => $ev_takt_neu));
         if ($ev_js !== false) {
             ev_datei_schreiben(ev_mqtt_gesendet_datei(), $ev_js, 0664);
         }
@@ -3130,8 +3181,11 @@ function ev_zeile($werte = null)
         $w = $werte[$name]['wert'];
         /* Keine erfundene 0 fuer einen Zustand ohne Aussage (C5, M1, seit
          * 0.9.34): liefert der Abruf das Feld nicht, steht -1 da, wo die Zahl
-         * -1 sonst nie annimmt (ev_ohne_minus1()). */
-        if (!empty($werte[$name]['ohne']) && ev_ohne_minus1($name, $d)) { $w = -1; }
+         * -1 sonst nie annimmt; seit 0.9.45 -1/-999 nach ev_ohne_wert(), Entwurf ev 2.3). */
+        if (!empty($werte[$name]['ohne'])) {
+            $ev_ow = ev_ohne_wert($name, $d, 'http');   // seit 0.9.45: -1/-999 (Entwurf ev 2.3)
+            if ($ev_ow !== null) { $w = $ev_ow; }
+        }
         $teile[] = strtoupper($name) . '=' . $w;
     }
     return 'EVCC;' . implode(';', $teile) . "\n";
@@ -3314,7 +3368,8 @@ function ev_vorlage_ein()
         $text = ev_kurztext($d['text'], isset($d['nr']) ? $d['nr'] : null);
         /* Kann das Feld ohne Aussage -1 tragen (C5, M1)? Dann muss der
          * Eingang es auch annehmen - sonst kappte Loxone auf MinVal. */
-        $min = ev_ohne_minus1($name, $d) ? min(-1, (int) $d['min']) : $d['min'];
+        $ev_ow = ev_ohne_wert($name, $d, 'http');
+        $min = is_int($ev_ow) ? min($ev_ow, (int) $d['min']) : $d['min'];
         $cmds[] = array(
             // Das Semikolon gehoert ins Suchmuster. Jedes Feld steht in der
             // Zeile hinter einem ';' - ohne es traefe ein kuenftiger Feldname,
@@ -4795,6 +4850,7 @@ function ev_wert_pruefen($schluessel, $wert)
             return preg_match('/^[0-9]{1,2}$/', $s) === 1 && (int) $s <= EV_FAHRZEUGE;
         case 'steuerung_ein':
         case 'mqtt_ein':
+        case 'befehle_mqtt_ein':
         case 'tarife_ein':
         case 'update_ein':
         case 'wache_ein':
@@ -4970,6 +5026,13 @@ function ev_sicherung_lesen($roh)
                 if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
                 $neu[$fk] = $ev_jetzt_cfg[$fk];
                 $ev_abehalten[] = $fk;
+                continue;
+            }
+            /* Gruppe 4 / MQTT (0.9.45): eine Sicherung von vor 0.9.45 kennt "Befehle ueber MQTT annehmen"
+             * nicht; der Haken steht danach aus (ab Werk), und die Seite sagt es. */
+            if ($fk === 'befehle_mqtt_ein') {
+                $neu[$fk] = 0;
+                $hinweise[] = ev_t('BEFEHL.SICH_AUS');
                 continue;
             }
             if (in_array($fk, ev_wache_schluessel(), true)) {
@@ -5770,4 +5833,707 @@ function ev_wachposten()
         return ev_t('WACHE.FALSCH');
     }
     return '';
+}
+
+/* ==================================================================
+ * Gruppe 4 / MQTT (0.9.45): Namenstabelle, Lebenszeichen, Befehle und Befehlsbruecke
+ *
+ * Grundlage: Musterprojekt/entwurf_gruppe4_ev.txt (E1-E15), ENTSCHEIDUNGEN_GRUPPE4_MQTT.md
+ * (Befehle ueber die Befehlsbruecke des Plugins, nicht ueber EVCCs eigenes evcc/.../set; zweiter
+ * Haken ist das vorhandene "Steuerung aus Loxone zulassen"; -1/-999 auch ueber HTTP mit den
+ * Ausnahmen des Entwurfs), Bauvorschrift wz_bild/GRUPPE4_BAUVORSCHRIFT.md. Fuer Werte ueber das
+ * MQTT-Gateway gibt es KEINE Importvorlage: je Wert ein einfacher Virtueller Eingang, Name genau
+ * so, wie das Gateway ihn vergibt (Gruppe 1 Nachtrag 2). Die Namen kommen aus EINER Funktion
+ * (ev_mqtt_gateway_name()) fuer Namenstabelle, Hakenliste, Baustein-Listen und Selbstpruefung.
+ * Die HTTP-Vorlagen bleiben fuer bestehende Anlagen (Reiter "Einbindung in Loxone", zugeklappt).
+ * ================================================================== */
+
+/** Der Themenpraefix, gesaeubert wie in ev_config(). Liest nur (ev_config(false)). */
+function ev_mqtt_praefix()
+{
+    $c = ev_config(false);
+    return ev_mqtt_thema((string) $c['mqtt_topic']);
+}
+
+/** Der Name, unter dem das MQTT-Gateway ein Thema an den Miniserver gibt: "/", Leerzeichen und "%"
+ *  werden "_" (Regeln/07, Umbenennungsregel beider Gateway-Fassungen). EINE Stelle (Entwurf ev 2.4). */
+function ev_mqtt_gateway_name($thema, $praefix = null)
+{
+    if ($praefix === null) { $praefix = ev_mqtt_praefix(); }
+    return str_replace(array('/', ' ', '%'), '_', ev_mqtt_thema((string) $praefix . '/' . (string) $thema));
+}
+
+/**
+ * Das Lebenszeichen im 30-s-Abstand (Entwurf ev 2.2 a): status/ok, status/ts, status/zaehler.
+ * Anders als ev_mqtt_lebenszeichen_liste() OHNE den Zweig "bei Aenderung sofort" - status/zaehler
+ * aendert sich in jedem Durchlauf und ginge sonst je Durchlauf hinaus (die 4 Datagramme je Minute,
+ * die 0.9.34 abgestellt hat). Nie retained; auch ohne Antwort von EVCC (sie sagen "Plugin laeuft").
+ */
+function ev_mqtt_lebenszeichen_takt()
+{
+    return array('status/ok', 'status/ts', 'status/zaehler');
+}
+
+/** Die Themen der Musterseiten (Musterprojekt/baustein_listen.txt, Stand 21.10.2026): 67 Zahlen,
+ *  2 Texte und das Lebenszeichen status/zaehler. Daraus und aus status/befehle die Hakenliste (71). */
+function ev_mqtt_im_muster()
+{
+    return array(
+        'status/zaehler', 'netz_kw', 'pv_kw', 'speicher_kw', 'speicher_soc', 'haus_kw', 'gruen_haus', 'gruen_laden',
+        'netzladen_aktiv', 'prioritaets_soc', 'puffer_soc', 'batteriemodus_nr', 'residualleistung_w',
+        'entladeregelung', 'speicher_kapazitaet_kwh', 'zusatz_kw', 'prognose_heute', 'prognose_morgen',
+        'prognose_uebermorgen', 'tarif_netz', 'tarif_einspeisung', 'tarif_co2', 'preis_min_24h', 'preis_max_24h',
+        'preis_schnitt_24h', 'preis_rang', 'preis_stunden', 'preis_guenstigste_stunde', 'preis_ok',
+        'lp1_verbunden', 'lp1_laedt', 'lp1_freigegeben', 'lp1_leistung_kw', 'lp1_geladen_kwh', 'lp1_restzeit_min',
+        'lp1_phasen', 'lp1_fahrzeug_soc', 'lp1_fahrzeug_km', 'lp1_solaranteil', 'lp1_plan_aktiv',
+        'lp1_smartcost_aktiv', 'lp1_modus_nr', 'lp1_limit_soc', 'lp1_prioritaet', 'lp1_min_soc', 'lp1_minstrom_a',
+        'lp1_maxstrom_a', 'lp1_smartcost_grenze', 'lp1_batterieboost', 'lp1_phasen_soll', 'lp1_pv_warten_min',
+        'lp1_phasen_warten_min', 'lp1_gesamt_kwh', 'lp1_sitzung_preis', 'lp1_sitzung_preis_kwh', 'lp1_sitzung_co2',
+        'lp1_ladedauer_min', 'lp1_rest_kwh', 'lp1_strom_a', 'lp1_plan_soc', 'lp1_plan_kwh', 'lp1_fahrzeug_name',
+        'fz1_soc', 'fz1_km', 'fz1_limit_soc', 'ok', 'dienst', 'betriebsbereit', 'fehler_nr', 'letzter_fehler',
+    );
+}
+
+/** Bereich als Text "min ... max Einheit" aus ev_felder(); fuer Texte ''. */
+function ev_mqtt_bereich_text($min, $max, $einheit)
+{
+    $z = function ($x) {
+        $f = (float) $x;
+        return ($f == (int) $f) ? (string) (int) $f : rtrim(rtrim(sprintf('%.3F', $f), '0'), '.');
+    };
+    return $z($min) . ' … ' . $z($max) . ($einheit !== '' ? ' ' . $einheit : '');
+}
+
+/**
+ * Die Namenstabelle (Reiter "Einbindung in Loxone", Schritt 3) - EINE Liste fuer Tabelle, Hakenliste,
+ * Reiter MQTT und Selbstpruefung (Entwurf ev 2.4). Reihenfolge wie ev_felder(), dann ts und die
+ * Lebenszeichen, zuletzt status/befehle (sendet die Befehlsbruecke). Je Zeile: thema, name,
+ * bedeutung (Klartext), art (zahl|text), bereich, ohne (Wert ohne Aussage: -1, -999, 0 oder "-"),
+ * retained, im_muster, haken. $praefix: fuer die Gegenprobe; sonst der eingestellte.
+ */
+function ev_mqtt_namen($praefix = null)
+{
+    if ($praefix === null) { $praefix = ev_mqtt_praefix(); }
+    $muster = array_flip(ev_mqtt_im_muster());
+    $nicht = array_flip(ev_mqtt_nicht_senden());
+    $aus = array();
+    foreach (ev_felder() as $n => $d) {
+        if (isset($nicht[$n])) { continue; }
+        $text = ($d['typ'] === 'text');
+        $bed = ev_t($d['text']);
+        if (isset($d['nr'])) { $bed = sprintf($bed, (int) $d['nr']); }
+        $ow = ev_ohne_wert($n, $d, 'mqtt');
+        $aus[] = array('thema' => $n, 'name' => ev_mqtt_gateway_name($n, $praefix),
+                       'bedeutung' => trim(strip_tags(html_entity_decode($bed, ENT_QUOTES, 'UTF-8'))),
+                       'art' => $text ? 'text' : 'zahl',
+                       'bereich' => $text ? '' : ev_mqtt_bereich_text(($ow !== null && is_int($ow)) ? min($ow, $d['min']) : $d['min'],
+                                                                      $d['max'], (string) $d['einheit']),
+                       'ohne' => ($ow === null) ? '0' : (string) $ow,
+                       'retained' => (bool) ev_retain_fuer($n), 'im_muster' => isset($muster[$n]),
+                       'haken' => isset($muster[$n]));
+    }
+    $zusatz = array(
+        'ts'             => array('BEFEHL.TH_TS', '0 … 2000000000 s'),
+        'status/ok'      => array('BEFEHL.TH_STATUS_OK', '0 … 1'),
+        'status/ts'      => array('BEFEHL.TH_STATUS_TS', '0 … 2000000000 s'),
+        'status/zaehler' => array('BEFEHL.TH_STATUS_ZAEHLER', '0 … 999'),
+        'status/befehle' => array('BEFEHL.TH_STATUS', '-1 … 1'),
+    );
+    foreach ($zusatz as $t => $x) {
+        $aus[] = array('thema' => $t, 'name' => ev_mqtt_gateway_name($t, $praefix), 'bedeutung' => ev_t($x[0]),
+                       'art' => 'zahl', 'bereich' => $x[1], 'ohne' => '–', 'retained' => false,
+                       'im_muster' => isset($muster[$t]), 'haken' => isset($muster[$t]) || $t === 'status/befehle');
+    }
+    return $aus;
+}
+
+/** Hakenliste fuer Gateway V2 (Entwurf ev 2.4): ab Werk 67 Zahlen und 2 Texte der Musterseiten,
+ *  status/zaehler und status/befehle - 71 Haken. Kein Thema braucht "Noncached" oder "Zuruecksetzen
+ *  nach Senden". Je Zeile array(Thema voll, Name, Bedeutung, art). */
+function ev_mqtt_hakenliste()
+{
+    $p = ev_mqtt_praefix();
+    $aus = array();
+    foreach (ev_mqtt_namen($p) as $z) {
+        if ($z['haken']) { $aus[] = array($p . '/' . $z['thema'], $z['name'], $z['bedeutung'], $z['art']); }
+    }
+    return $aus;
+}
+
+/**
+ * Pruefzeile "Namenstabelle" (Entwurf ev 2.4): jeder Name der Tabelle ist ein Feld aus ev_felder() (ohne
+ * alter_s, das nie ueber MQTT geht) oder ein Lebenszeichen (ts, status/ok|ts|zaehler, status/befehle), und
+ * jedes davon steht in der Tabelle. Die Gegenseite wird OHNE ev_mqtt_gateway_name() gebildet. $namen: fuer
+ * die Gegenprobe (ein falsch geschriebener Name muss rot werden). Rueckgabe array(1|0, Text).
+ */
+function ev_mqtt_namen_probe($namen = null)
+{
+    $p = ev_mqtt_praefix();
+    if ($namen === null) {
+        $namen = array();
+        foreach (ev_mqtt_namen($p) as $z) { $namen[] = $z['name']; }
+    }
+    $soll = array();
+    $themen = array_diff(array_keys(ev_felder()), ev_mqtt_nicht_senden());
+    foreach (array_merge($themen, array('ts', 'status/ok', 'status/ts', 'status/zaehler', 'status/befehle')) as $t) {
+        $soll[] = strtr($p . '/' . $t, array('/' => '_', ' ' => '_', '%' => '_'));
+    }
+    $nur_tabelle = array_values(array_diff($namen, $soll));
+    $nur_themen = array_values(array_diff($soll, $namen));
+    if ($nur_tabelle || $nur_themen) {
+        return array(0, sprintf(ev_t('TEST.A_NAMEN_NEIN'),
+            ev_e($nur_tabelle ? implode(', ', $nur_tabelle) : '-'), ev_e($nur_themen ? implode(', ', $nur_themen) : '-')));
+    }
+    return array(1, sprintf(ev_t('TEST.A_NAMEN_JA'), count($namen), count(ev_mqtt_hakenliste())));
+}
+
+/**
+ * Das Abo fuer Gateway V1 (Entwurf ev E6): config/mqtt_subscriptions.cfg im Konfigurationsordner traegt
+ * "<praefix>/#"; das Gateway liest die Plugin-Abos selbst. Mitgeliefert mit "evcc2lox/#", nachgefuehrt beim
+ * Speichern des Reiters MQTT, beim Zurueckspielen und je Cron-Lauf (ein Update spielt die Konfiguration aus
+ * der Sicherung zurueck). Rueckgabe array(Pfad, liegt richtig). Bauart eb_abo_datei() (Einspeisebremse 0.9.37).
+ */
+function ev_abo_datei($praefix, $schreiben = false)
+{
+    $p = ev_paths();
+    $pfad = $p['configdir'] . '/mqtt_subscriptions.cfg';
+    $soll = ev_mqtt_thema((string) $praefix) . '/#';
+    $roh = is_readable($pfad) ? (string) @file_get_contents($pfad) : '';
+    $da = in_array($soll, array_map('trim', preg_split('/\r?\n/', $roh)), true);
+    if ($schreiben && $roh !== $soll . "\n" && is_dir($p['configdir'])) {
+        if (ev_datei_schreiben($pfad, $soll . "\n", 0644)) {
+            ev_log('Gateway-Abo gesetzt: ' . $soll);
+            $da = true;
+        }
+    }
+    return array($pfad, $da);
+}
+
+/* ---------------- Befehle: EINE Funktion fuer Endpunkt und Befehlsbruecke ----------------
+ * Bis 0.9.44 stand diese Pruefung in webfrontend/html/index.php (Zeilen 425-697). Seit 0.9.45 rufen der
+ * HTTP-Endpunkt (Quelle 'http', Antwort, Code und Protokoll unveraendert - Wirkungstest Quelle gegen Bau) und
+ * die Befehlsbruecke (Quelle 'mqtt', bin/befehle_zuordnung.php) dieselbe Funktion: Haken "Steuerung aus
+ * Loxone zulassen", Kennung von=, Ladepunkt, Wert (ev_befehl_pruefen()), Ladeplan-Stunden, Schreiber-Wache,
+ * Befehlsbremse samt Nachreichen, Ladeplan aus zwei Ausgaengen, GERUNDET, Trockenlauf, Senden, Bremse merken.
+ * Das Token prueft weiter nur der Endpunkt; auf dem MQTT-Weg ersetzen es die Anmeldung am Broker und beide
+ * Haken (Entwurf gemeinsam E13). Auf dem MQTT-Weg: von = 'mqtt', Adresse '' (ohne REMOTE_ADDR), kein
+ * Trockenlauf - die Wache sieht "mqtt" als eigenen Schreiber (Entwurf ev E9). */
+
+/**
+ * Schreiber-Wache (Energie-1 C1, Entscheidung Nr. 25; bis 0.9.44 im Endpunkt): merken und melden, und nur mit
+ * "Fremde Schreiber abweisen" einen Befehl eines nicht erlaubten Schreibers abweisen, bevor die Bremse ihn
+ * sieht und bevor etwas an EVCC geht. Ruecknahmen nie (ev_wache_ruecknahme()). Der Trockenlauf merkt sich
+ * nichts, prueft die Sperre aber wie echt. Rueckgabe array(Zusatz der Antwortzeile, abweisen):
+ * ;SCHREIBER=n ab zwei Schreibern im Fenster, ;WACHE=MERKER, wenn das Merken nicht ging.
+ */
+function ev_wache_anwenden($aktion, $klar, $von, $probe, $ip)
+{
+    $w = ev_wache_einstellungen(ev_config(false));
+    list($aktiv, $erlaubt, $fehler) = ev_wache_sperre_urteil($w, $von, $ip);
+    if ($fehler !== '') {
+        ev_log_wenn_neu('wache_liste', 'Fremde Schreiber abweisen ist eingeschaltet, aber die Liste der '
+            . 'erlaubten Schreiber ist leer oder unbrauchbar - die Sperre wirkt NICHT, bis die Liste im Reiter '
+            . 'Einstellungen berichtigt ist.');
+    } elseif ($w['wache_sperren_ein'] === 1 && is_file(ev_tmpdir() . '/letzte_wache_liste.txt')) {
+        ev_log_wenn_neu('wache_liste', 'Die Liste der erlaubten Schreiber ist brauchbar, die Sperre wirkt.');
+    }
+    $abweisen = $aktiv && !$erlaubt && !ev_wache_ruecknahme($aktion, $klar);
+    $zusatz = '';
+    if (!$probe && $w['wache_ein'] === 1) {
+        $m = ev_wache_merken($von, $ip, $aktion, $abweisen, $w);
+        if ($m['anzahl'] > 1) {
+            $zusatz .= ';SCHREIBER=' . (int) $m['anzahl'];
+        }
+        if (!$m['merker']) {
+            $zusatz .= ';WACHE=MERKER';
+        }
+    }
+    return array($zusatz, $abweisen);
+}
+
+/** Eine Antwortzeile wie bis 0.9.44 ev_ende() im Endpunkt sie bildete: EINE Zeile, der Zusatz der Wache
+ *  hinten an, im Trockenlauf PROBE=1 gleich hinter OK. Ohne Zeilenende. */
+function ev_befehl_zeile($text, $wz, $probe)
+{
+    $text = rtrim(str_replace(array("\r\n", "\r", "\n"), ' ', (string) $text));
+    if ($wz !== '') { $text .= $wz; }
+    if ($probe) { $text = preg_replace('/^EVCC;OK=([01])/', 'EVCC;OK=$1;PROBE=1', $text, 1); }
+    return rtrim($text);
+}
+
+/**
+ * Einen schreibenden Befehl ausfuehren. $aktion: Schluessel aus ev_befehle(). $p: 'lp', 'wert', 'stunden',
+ * 'von' (je der rohe Wert der Anfrage, null = nicht angegeben), 'ip' (Absender, '' auf dem MQTT-Weg),
+ * 'probe' (Trockenlauf), 'anrufer' (fuer das Protokoll). $quelle 'http' oder 'mqtt'.
+ * Rueckgabe array(HTTP-Code, Antwortzeile ohne Zeilenende) - genau die Zeile, die der Endpunkt ausgibt.
+ */
+function ev_befehl_ausfuehren($aktion, array $p, $quelle = 'http')
+{
+    $probe = !empty($p['probe']);
+    $ip = isset($p['ip']) ? (string) $p['ip'] : '';
+    $anrufer = isset($p['anrufer']) ? (string) $p['anrufer'] : ($quelle === 'mqtt' ? 'mqtt' : '?');
+    $wz = '';
+    $ende = function ($code, $text) use (&$wz, $probe) {
+        return array((int) $code, ev_befehl_zeile($text, $wz, $probe));
+    };
+    $cfg = ev_config(false);
+    $befehle = ev_befehle();
+    if (!is_string($aktion) || !isset($befehle[$aktion])) {
+        return $ende(400, 'EVCC;OK=0;GRUND=UNBEKANNTE_AKTION');
+    }
+    if (empty($cfg['steuerung_ein'])) {
+        return $ende(403, "EVCC;OK=0;GRUND=STEUERUNG_AUS\n"
+                     . 'Schreibende Befehle sind gesperrt. Reiter Einstellungen, '
+                     . 'Haken "Steuerung aus Loxone zulassen".');
+    }
+    $b = $befehle[$aktion];
+
+    /* Schreiber-Wache (Energie-1 C1): &von= lesen. Fehlt es: '' (ohne Kennung). Eine Kennung, die nicht ins
+     * Muster passt (1..32 aus A-Z a-z 0-9 _ -), wird abgewiesen wie ein falscher Wert. */
+    $ev_von = '';
+    if (array_key_exists('von', $p) && $p['von'] !== null) {
+        $ev_von = is_string($p['von']) ? (string) $p['von'] : '';
+        if (!ev_wache_kennung_gueltig($ev_von)) {
+            return $ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=VON;ERLAUBT=A-Z,a-z,0-9,_,-;LAENGE=1..32');
+        }
+    }
+
+    /* Ladepunkt pruefen - streng seit 0.9.34 (C9): nur eine Zahl aus Ziffern; ohne Angabe Ladepunkt 1. */
+    $lp = 1;
+    if (array_key_exists('lp', $p) && $p['lp'] !== null) {
+        $ev_lp_roh = is_string($p['lp']) ? (string) $p['lp'] : '';
+        if (!preg_match('/^[0-9]{1,2}\z/', $ev_lp_roh)) {
+            return $ende(400, 'EVCC;OK=0;GRUND=LADEPUNKT_UNGUELTIG;ERLAUBT=1..' . EV_LADEPUNKTE);
+        }
+        $lp = (int) $ev_lp_roh;
+    }
+    if ($b['ebene'] === 'lp' && ($lp < 1 || $lp > EV_LADEPUNKTE)) {
+        return $ende(400, 'EVCC;OK=0;GRUND=LADEPUNKT_UNGUELTIG;ERLAUBT=1..' . EV_LADEPUNKTE);
+    }
+
+    /* Wert pruefen. Die Regel steht in ev_befehle()/ev_befehl_pruefen(). */
+    $wert = (isset($p['wert']) && is_string($p['wert'])) ? trim((string) $p['wert']) : '';
+    if ($b['pruef'] !== 'ohne' && $wert === '') {
+        return $ende(400, 'EVCC;OK=0;GRUND=WERT_FEHLT');
+    }
+    list($ok, $klar) = ev_befehl_pruefen($b, $wert);
+    if (!$ok) {
+        return $ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=' . $klar);
+    }
+
+    /* Der Ladeplan 'plansoc' braucht zusaetzlich eine Zeit, als VORLAUF IN STUNDEN (Loxone kann keine
+     * ISO-Zeit bilden). */
+    $zeit = '';
+    $std = '';
+    if ($b['pruef'] === 'plan') {
+        $std = (isset($p['stunden']) && is_string($p['stunden'])) ? str_replace(',', '.', (string) $p['stunden']) : '';
+        if (!is_numeric($std)) {
+            return $ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=STUNDEN_FEHLT;ERLAUBT=0.25..168');
+        }
+        $std = (float) $std;
+        if ($std < 0.25 || $std > 168) {
+            return $ende(400, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BEREICH;FELD=stunden;ERLAUBT=0.25..168');
+        }
+        $zeit = gmdate('Y-m-d\TH:i:s\Z', time() + (int) round($std * 3600));
+    }
+
+    /* Schreiber-Wache VOR der Bremse: auch ein Befehl, den die Bremse als unveraendert beantwortet, kommt von
+     * einem Schreiber. Ab hier traegt jede Antwort ihren Zusatz - ausser der Abweisung 409 selbst (bis 0.9.44
+     * endete der Endpunkt dort, bevor der Zusatz feststand). */
+    list($ev_wz_neu, $ev_abweisen) = ev_wache_anwenden($aktion, $klar, $ev_von, $probe, $ip);
+    if ($ev_abweisen) {
+        return $ende(409, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=FREMDSCHREIBER');
+    }
+    $wz = $ev_wz_neu;
+
+    /* Befehlsbremse (C3, seit 0.9.34; Nachreichen seit 0.9.43): derselbe Wert binnen 60 s -> UNVERAENDERT,
+     * ein anderer Wert hoechstens alle 10 s (429, GRUND=BREMSE, gemerkt zum Nachreichen), Merker nicht zu
+     * oeffnen -> 503. Die Sperre bleibt bis zum Ende des Befehls gehalten. Im Trockenlauf wird der Merker nur
+     * gelesen und nie angelegt. */
+    $ev_bremse = ev_tmpdir() . '/befehlsbremse.json';
+    if ($probe) {
+        clearstatcache(true, $ev_bremse);
+        if (!file_exists($ev_bremse)) {
+            $ev_bfh = is_writable(dirname($ev_bremse)) ? null : false;
+        } elseif (!is_file($ev_bremse)) {
+            $ev_bfh = false;
+        } else {
+            $ev_bfh = @fopen($ev_bremse, 'r');
+        }
+        $ev_bsperre = LOCK_SH;
+    } else {
+        $ev_bfh = @fopen($ev_bremse, 'c+');
+        $ev_bsperre = LOCK_EX;
+    }
+    if ($ev_bfh === false || ($ev_bfh !== null && !@flock($ev_bfh, $ev_bsperre))) {
+        ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') laesst sich '
+            . 'nicht oeffnen - schreibende Befehle werden mit 503 abgewiesen, bis das behoben ist. '
+            . 'Pruefen: Platz und Eigentuemer (loxberry).');
+        if (is_resource($ev_bfh)) { fclose($ev_bfh); }
+        return $ende(503, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BREMSE_MERKER');
+    }
+    $ev_bfrei = function () use (&$ev_bfh) {
+        if (is_resource($ev_bfh)) {
+            flock($ev_bfh, LOCK_UN);
+            fclose($ev_bfh);
+        }
+    };
+    $ev_bm = ($ev_bfh === null) ? array() : json_decode((string) stream_get_contents($ev_bfh), true);
+    if (!is_array($ev_bm)) { $ev_bm = array(); }
+    $ev_bschl = $aktion . '|' . ($b['ebene'] === 'lp' ? $lp : 0);
+    $ev_bwert = $klar . ($b['pruef'] === 'plan' ? '|' . $std : '');
+    $ev_bm_vorher = $ev_bm;
+    list($ev_burteil, $ev_bwarten, $ev_bgemerkt) = ev_bremse_urteil($ev_bm, $ev_bschl, $ev_bwert, time(),
+        $probe ? null : array('a' => $aktion, 'lp' => $lp, 'k' => $klar, 's' => $std, 'von' => $ev_von));
+    if (!$probe && $ev_bm !== $ev_bm_vorher && !ev_bremse_schreiben($ev_bfh, $ev_bm)) {
+        ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') liess sich '
+            . 'nicht schreiben - ein abgewiesener Wert wird nicht nachgereicht.');
+        $ev_bgemerkt = false;
+    }
+    if ($ev_burteil === 'unveraendert') {
+        $ev_bfrei();
+        return $ende(200, 'EVCC;OK=1;AKTION=' . $aktion . ';WERT=' . $klar . ';UNVERAENDERT=1');
+    }
+    if ($ev_burteil === 'gebremst') {
+        $ev_bfrei();
+        return $ende(429, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=BREMSE;WARTEN_S=' . $ev_bwarten
+            . ($ev_bgemerkt ? ';NACHREICHEN=1' : ''));
+    }
+
+    /* Ladeplan aus zwei Ausgaengen (C11, seit 0.9.34): Ziel und Vorlauf je aus einem eigenen Ausgang; das
+     * Plugin merkt sich beide je Ladepunkt und sendet den Plan, sobald beide bekannt sind - mit dem Vorlauf ab
+     * JETZT. */
+    $ev_z = '';
+    $ev_s = '';
+    if ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') {
+        $ev_plan = ev_tmpdir() . '/ladeplan.json';
+        $ev_teil = ($b['pruef'] === 'planziel') ? 'ziel' : 'stunden';
+        if ($probe) {
+            clearstatcache(true, $ev_plan);
+            if (file_exists($ev_plan) && !is_file($ev_plan)) {
+                $ev_bfrei();
+                return $ende(503, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=PLAN_MERKER');
+            }
+            $ev_pm = is_file($ev_plan) ? json_decode((string) @file_get_contents($ev_plan), true) : array();
+            if (!is_array($ev_pm)) { $ev_pm = array(); }
+            $ev_pm[(string) $lp][$ev_teil] = $klar;
+        } else {
+            $ev_pfh = @fopen($ev_plan, 'c+');
+            if ($ev_pfh === false || !@flock($ev_pfh, LOCK_EX)) {
+                ev_log_wenn_neu('ladeplan', 'Die Merkerdatei des Ladeplans (' . $ev_plan . ') laesst sich '
+                    . 'nicht oeffnen - der Ladeplan wird nicht gesetzt.');
+                if (is_resource($ev_pfh)) { fclose($ev_pfh); }
+                $ev_bfrei();
+                return $ende(503, 'EVCC;OK=0;AKTION=' . $aktion . ';GRUND=PLAN_MERKER');
+            }
+            $ev_pm = json_decode((string) stream_get_contents($ev_pfh), true);
+            if (!is_array($ev_pm)) { $ev_pm = array(); }
+            $ev_pm[(string) $lp][$ev_teil] = $klar;
+            ftruncate($ev_pfh, 0);
+            rewind($ev_pfh);
+            fwrite($ev_pfh, (string) json_encode($ev_pm));
+            fflush($ev_pfh);
+            flock($ev_pfh, LOCK_UN);
+            fclose($ev_pfh);
+        }
+        $ev_z = isset($ev_pm[(string) $lp]['ziel']) ? (string) $ev_pm[(string) $lp]['ziel'] : '';
+        $ev_s = isset($ev_pm[(string) $lp]['stunden']) ? (string) $ev_pm[(string) $lp]['stunden'] : '';
+        if ($ev_z === '' || $ev_s === '') {
+            $ev_bfrei();
+            return $ende(200, 'EVCC;OK=1;AKTION=' . $aktion . ';WERT=' . $klar . ';GEMERKT=' . ($probe ? '0' : '1')
+                . ';FEHLT=' . ($ev_z === '' ? 'plansoc_ziel' : 'plansoc_stunden'));
+        }
+        $zeit = gmdate('Y-m-d\\TH:i:s\\Z', time() + (int) round((float) $ev_s * 3600));
+        $pfad = str_replace(array('%LP%', '%WERT%', '%ZEIT%'),
+            array((string) $lp, rawurlencode($ev_z), rawurlencode($zeit)), $b['pfad']);
+    } else {
+        $pfad = str_replace(array('%LP%', '%WERT%', '%ZEIT%'),
+            array((string) $lp, rawurlencode($klar), rawurlencode($zeit)), $b['pfad']);
+    }
+
+    /* Wurde die Eingabe gerundet? Dann wird es GESAGT (CLAUDE.md Abschnitt 4) - nur bei den Befehlsarten,
+     * bei denen $klar dieselbe Zahl ist. */
+    $gerundet = '';
+    if (in_array($b['pruef'], array('ganz', 'plan', 'liste', 'planziel'), true)
+        && is_numeric(str_replace(',', '.', $wert))
+        && (string) $klar !== (string) $wert) {
+        $gerundet = ';GERUNDET=' . str_replace(';', ',', $wert);
+    }
+    $ev_pz = $probe ? 'PROBE=1;' : '';
+    if ($b['pruef'] === 'planziel' || $b['pruef'] === 'planstunden') {
+        $ev_antwort = sprintf("EVCC;OK=1;%sAKTION=%s;WERT=%s%s;ZIEL=%s;STUNDEN=%s;ZEIT=%s", $ev_pz, $aktion,
+                              $klar, $gerundet, $ev_z, $ev_s, $zeit);
+    } else {
+        $ev_antwort = sprintf("EVCC;OK=1;%sAKTION=%s;WERT=%s%s%s", $ev_pz, $aktion, $klar,
+                              $gerundet, $zeit !== '' ? ';ZEIT=' . $zeit : '');
+    }
+    $ev_antwort .= $wz;
+
+    /* Der Trockenlauf endet hier (EVCC-b1): nichts an EVCC, der Bremsmerker bleibt, wie er war. */
+    if ($probe) {
+        $ev_bfrei();
+        ev_log_wenn_neu('probe', 'Trockenlauf ' . $aktion . ' (' . $klar . ') fuer '
+            . ($b['ebene'] === 'lp' ? 'Ladepunkt ' . $lp : 'die Anlage')
+            . ' von ' . $anrufer . ' geprueft - nichts gesendet.');
+        return array(200, $ev_antwort);
+    }
+
+    $ev_weg = ($quelle === 'mqtt') ? ' (MQTT)' : '';
+    $a = ev_http($pfad, $b['methode']);
+    if (!$a['ok']) {
+        ev_log('Befehl ' . $aktion . ' (' . $klar . ') an ' . $pfad . ' FEHLGESCHLAGEN' . $ev_weg . ': ' . $a['fehler']);
+        /* Ein Befehl aus der Dokumentation, den EVCC nicht kennt, sieht in der Antwort anders aus als ein
+         * Netzfehler. */
+        $zusatz = '';
+        if ($b['quelle'] === 'doku' && (int) $a['code'] === 404) {
+            $zusatz = ';HINWEIS=Dieser Befehl stammt aus der EVCC-Dokumentation und ist an keiner '
+                    . 'Anlage gemessen. Ihre EVCC-Fassung kennt den Pfad ' . $b['pfad'] . ' nicht.';
+        }
+        $ev_bfrei();
+        return $ende(502, 'EVCC;OK=0;AKTION=' . $aktion . ';CODE=' . (int) $a['code']
+                     . ';GRUND=' . str_replace(';', ',', (string) $a['fehler']) . $zusatz);
+    }
+    ev_log('Befehl ' . $aktion . ' (' . $klar . ') an '
+         . ($b['ebene'] === 'lp' ? 'Ladepunkt ' . $lp : 'die Anlage') . ' gesendet' . $ev_weg);
+    /* Die Bremse merkt sich den GESENDETEN Wert (C3). Scheitert das Schreiben, wirkt der Befehl trotzdem -
+     * aber das steht im Protokoll. */
+    $ev_bm[$ev_bschl] = array('w' => $ev_bwert, 't' => time());
+    if (!(ftruncate($ev_bfh, 0) && rewind($ev_bfh)
+          && fwrite($ev_bfh, (string) json_encode($ev_bm)) !== false && fflush($ev_bfh))) {
+        ev_log_wenn_neu('bremse', 'Die Merkerdatei der Befehlsbremse (' . $ev_bremse . ') liess sich '
+            . 'nicht schreiben - die Bremse erkennt den letzten Befehl nicht.');
+    }
+    $ev_bfrei();
+    // Der zwischengespeicherte Zustand ist jetzt veraltet.
+    @unlink(ev_tmpdir() . '/state.json');
+    return array(200, $ev_antwort);
+}
+
+/**
+ * Die Rueckgabe von ev_befehl_ausfuehren() fuer die Bruecke: array(bool, Grund) (Entwurf ev 3.2, $ev_um).
+ * 200 heisst angenommen - auch UNVERAENDERT=1 und GEMERKT=1 (Ladeplan, ein Teil fehlt); 429 mit NACHREICHEN=1
+ * ebenso (der Wert kommt mit dem naechsten Abruf); sonst der Grund aus GRUND=... (STEUERUNG_AUS, BEREICH,
+ * MODUS_UNGUELTIG, BREMSE, FREMDSCHREIBER, ...), bei 502 mit dem Code von EVCC davor.
+ */
+function ev_befehl_bruecke($r)
+{
+    if (!is_array($r) || !isset($r[0], $r[1])) { return array(false, 'FEHLER'); }
+    $code = (int) $r[0];
+    $zeile = (string) $r[1];
+    if ($code === 200) { return array(true, ''); }
+    if ($code === 429 && strpos($zeile, ';NACHREICHEN=1') !== false) { return array(true, 'NACHREICHEN'); }
+    $g = preg_match('/;GRUND=([^;]*)/', $zeile, $m) ? $m[1] : 'HTTP ' . $code;
+    if (preg_match('/;ERLAUBT=([^;]*)/', $zeile, $m2)) { $g .= ' ERLAUBT=' . $m2[1]; }
+    if ($code === 502 && preg_match('/;CODE=([0-9]+)/', $zeile, $m3)) { $g = 'EVCC ' . $m3[1] . ': ' . $g; }
+    return array(false, $g);
+}
+
+/** Einstellungen fuer die Zuordnung (Entwurf gemeinsam 2.5, ev 3.2): Praefix aus mqtt_topic, annehmen =
+ *  Haken "Befehle ueber MQTT annehmen" UND MQTT an, eingreifend = "Steuerung aus Loxone zulassen"
+ *  (steuerung_ein, E2). Liest nur (ev_config(false)). */
+function ev_befehle_einstellungen()
+{
+    $c = ev_config(false);
+    $mqtt = !empty($c['mqtt_ein']);
+    return array('praefix' => ev_mqtt_thema((string) $c['mqtt_topic']),
+                 'annehmen' => !empty($c['befehle_mqtt_ein']) && $mqtt,
+                 'eingreifend' => !empty($c['steuerung_ein']), 'mqtt_ein' => $mqtt);
+}
+
+/* ---------------- Befehlsbruecke (bin/befehlsbruecke.php, Stammfassung Werkzeuge/gemeinsam) ---------------- */
+
+/** Wo liegt bin/befehlsbruecke.php? Installiert unter bin/plugins/<ordner>, im Archiv neben webfrontend. */
+function ev_bruecke_datei()
+{
+    $p = ev_paths();
+    $kand = array();
+    if ($p['home'] !== '') { $kand[] = $p['home'] . '/bin/plugins/' . $p['plugin'] . '/befehlsbruecke.php'; }
+    $kand[] = dirname(dirname(__DIR__)) . '/bin/befehlsbruecke.php';
+    foreach ($kand as $k) {
+        if (is_file($k)) { return $k; }
+    }
+    return '';
+}
+
+/** Die Bruecke als Bibliothek laden (BB_NUR_LADEN: kein Hauptteil). */
+function ev_bruecke_laden()
+{
+    if (function_exists('bb_waechter')) { return true; }
+    $f = ev_bruecke_datei();
+    if ($f === '') { return false; }
+    if (!defined('BB_NUR_LADEN')) { define('BB_NUR_LADEN', true); }
+    require_once $f;
+    return function_exists('bb_waechter');
+}
+
+/**
+ * Direktstart bzw. -stopp beim Speichern der Reiter MQTT und Einstellungen (Bauart eb_bruecke_schalten(),
+ * fer_bruecke_schalten()): der Waechter im Minutentakt (bin/ev_abruf.php) startet nach einem Start hoechstens
+ * alle 600 s neu. befehlsbruecke.sh start startet nur nach --soll, nie als root, nie waehrend eines Updates,
+ * nie doppelt. Rueckgabe array(''|'ein'|'aus'|'start_fehl'|'stop_fehl', Ausgabe).
+ */
+function ev_bruecke_schalten()
+{
+    if (!ev_bruecke_laden()) { return array('', ''); }
+    $p = bb_pfade();
+    if (!$p) { return array('', ''); }
+    $e = ev_befehle_einstellungen();
+    $laeuft = (bool) bb_dienste();
+    if ($e['annehmen']) {
+        if ($laeuft) { return array('', ''); }
+        list($rc, $aus) = bb_sh($p, 'start');
+        if ($rc === 0 && bb_dienste()) {
+            ev_log('Befehlsbruecke beim Speichern gestartet.');
+            return array('ein', $aus);
+        }
+        ev_log('Befehlsbruecke: Start beim Speichern gescheitert (Rueckgabe ' . (int) $rc . '): ' . substr($aus, 0, 200));
+        return array('start_fehl', $aus);
+    }
+    if (!$laeuft) { return array('', ''); }
+    list($rc, $aus) = bb_sh($p, 'stop');
+    if ($rc === 0 && !bb_dienste()) {
+        ev_log('Befehlsbruecke beim Speichern angehalten.');
+        return array('aus', $aus);
+    }
+    return array('stop_fehl', $aus);
+}
+
+/** Der Waechter der Bruecke aus dem Minutentakt (bin/ev_abruf.php cron, nach der Sperre, Entwurf ev 3.3).
+ *  Ein Fehler darin haelt den Abruf nicht an; Rueckgabe wie bb_waechter() oder array(null, Grund). */
+function ev_bruecke_waechter()
+{
+    try {
+        if (!ev_bruecke_laden()) { return array(null, 'Befehlsbruecke fehlt'); }
+        return bb_waechter();
+    } catch (Throwable $t) {
+        ev_log_wenn_neu('bruecke_waechter', 'Waechter der Befehlsbruecke abgebrochen (' . get_class($t) . ': '
+            . substr($t->getMessage(), 0, 160) . ').');
+        return array(null, get_class($t));
+    }
+}
+
+/**
+ * Die Befehlsliste der Bruecke (bb_liste(): EINE Quelle fuer Reiter und Vorlage) mit dem Platzhalter der Linie
+ * (Entwurf ev 3.2, E7): die Stammfassung schreibt fuer die Art 'zahl' fest <v.1>; Preisgrenze, Energieziel und
+ * Netzladegrenze brauchen <v.3> (ev_vorlage_platzhalter(), der Fehler "0,25 wird 0" von 0.9.42). Die
+ * Stammfassung bleibt unberuehrt. $lp: Muster {lp} fuer diesen Ladepunkt ausrollen (Reiter, Vorlage); 0 = als
+ * Muster lassen. Rueckgabe Liste oder null (Bruecke fehlt, Tabelle defekt).
+ */
+function ev_bb_liste($lp = 0)
+{
+    if (!ev_bruecke_laden()) { return null; }
+    list($z) = bb_zuordnung_laden();
+    if ($z === null) { return null; }
+    list($f) = bb_zuordnung_pruefen($z);
+    if ($f) { return null; }
+    $l = bb_liste($z, bb_einstellungen($z));
+    $befehle = ev_befehle();
+    $neu = array();
+    foreach ($l['befehle'] as $b) {
+        $teile = explode('/', $b['name']);
+        $aktion = end($teile);
+        if ($b['art'] === 'zahl' && isset($befehle[$aktion]) && ev_vorlage_platzhalter($befehle[$aktion]) === '<v.3>') {
+            $b['loxone']['ein'] = preg_replace('/ <v\.1>\z/', ' <v.3>', $b['loxone']['ein']);
+        }
+        $b['aktion'] = $aktion;
+        if ($b['muster'] && (int) $lp > 0) {
+            $nr = (int) $lp;
+            $ers = function ($s) use ($nr) { return str_replace('{lp}', 'lp' . $nr, (string) $s); };
+            $b['name'] = $ers($b['name']);
+            $b['thema'] = $ers($b['thema']);
+            foreach (array('ein', 'aus') as $k) {
+                if (isset($b['loxone'][$k])) { $b['loxone'][$k] = $ers($b['loxone'][$k]); }
+            }
+            $b['titel'] = preg_replace('/ Ladepunkt \(MQTT\)\z/', ' Ladepunkt ' . $nr . ' (MQTT)', $b['titel']);
+            $b['muster'] = false;
+        }
+        $neu[] = $b;
+    }
+    $l['befehle'] = $neu;
+    return $l;
+}
+
+/** Vorlage "EVCC MQTT-Befehle" (bb_vorlage()): eigener Virtueller Ausgang an den UDP-Eingang des Gateways, die
+ *  Ladepunktbefehle je eingestelltem Ladepunkt ausgerollt (Entwurf ev 3.2). Rueckgabe array(name, inhalt) oder null. */
+function ev_befehle_vorlage()
+{
+    $cfg = ev_config(false);
+    $l = ev_bb_liste(0);
+    if ($l === null) { return null; }
+    $alle = array();
+    $anlage = array();
+    for ($i = 1; $i <= max(1, (int) $cfg['ladepunkte']); $i++) {
+        $li = ev_bb_liste($i);
+        foreach ($li['befehle'] as $b) {
+            if (strpos($b['name'], 'lp' . $i . '/') === 0) { $alle[] = $b; }
+        }
+    }
+    foreach ($l['befehle'] as $b) {
+        if (!$b['muster']) { $anlage[] = $b; }
+    }
+    $l['befehle'] = array_merge($alle, $anlage);
+    $host = isset($_SERVER['HTTP_HOST']) && $_SERVER['HTTP_HOST'] !== ''
+        ? preg_replace('/[^A-Za-z0-9\.\-]/', '', preg_replace('/:\d+\z/', '', (string) $_SERVER['HTTP_HOST']))
+        : (gethostname() ?: 'loxberry');
+    $mz = ev_mqtt_zustand();
+    $port = (int) $mz['udpport'];
+    return array('VQ_evcc_mqtt.xml', bb_vorlage($l, $host !== '' ? $host : 'loxberry', $port > 0 ? $port : 11884));
+}
+
+/** Der Befehl, wie Loxone ihn auf den Musterseiten sendet (Liste "EVCC Steuerung" usw.), fuer Ladepunkt 1:
+ *  array(ein, aus) aus ev_bb_liste(1); unbekannt -> array('', ''). */
+function ev_befehl_loxone($aktion)
+{
+    static $l = null;
+    if ($l === null) { $l = ev_bb_liste(1); }
+    if (is_array($l)) {
+        foreach ($l['befehle'] as $b) {
+            if ($b['aktion'] === $aktion) {
+                return array((string) $b['loxone']['ein'], isset($b['loxone']['aus']) ? (string) $b['loxone']['aus'] : '');
+            }
+        }
+    }
+    return array('', '');
+}
+
+/** Zeile "Laeuft die Befehlsbruecke?" (Entwurf gemeinsam 2.11): array(1|0|-1, Text). Gemessen wird das
+ *  Erzeugnis (zustand.json: ts, abo, Zaehler) und ob ein Dienst argumentweise laeuft - wie der Waechter. */
+function ev_pruef_bruecke()
+{
+    if (!ev_bruecke_laden()) { return array(0, ev_t('BEFEHL.P_FEHLT')); }
+    list($z, $fehler) = bb_zuordnung_laden();
+    if ($z === null) { return array(0, sprintf(ev_t('BEFEHL.P_DEFEKT'), ev_e($fehler))); }
+    list($f) = bb_zuordnung_pruefen($z);
+    if ($f) { return array(0, sprintf(ev_t('BEFEHL.P_DEFEKT'), ev_e($f[0]))); }
+    $c = ev_config(false);
+    if (empty($c['befehle_mqtt_ein'])) { return array(-1, ev_t('BEFEHL.P_AUS')); }
+    if (empty($c['mqtt_ein'])) { return array(-1, ev_t('BEFEHL.P_MQTT_AUS')); }
+    if (!bb_pfade()) { return array(-1, ev_t('BEFEHL.P_ARCHIV')); }
+    $zu = bb_zustand_lesen();
+    $alter = ($zu && isset($zu['ts'])) ? time() - (int) $zu['ts'] : null;
+    if (!bb_dienste()) { return array(0, ev_t('BEFEHL.P_STEHT')); }
+    if ($alter === null || $alter > BB_WACHE_GRENZE) { return array(0, sprintf(ev_t('BEFEHL.P_HAENGT'), (int) $alter)); }
+    if (empty($zu['abo'])) {
+        return array(0, sprintf(ev_t('BEFEHL.P_OHNE_ABO'), ev_e(isset($zu['fehler']) ? (string) $zu['fehler'] : '')));
+    }
+    $zl = (isset($zu['zaehler']) && is_array($zu['zaehler'])) ? $zu['zaehler'] : array();
+    $t = sprintf(ev_t('BEFEHL.P_LAEUFT'), date('d.m.Y H:i', isset($zu['start']) ? (int) $zu['start'] : time()),
+                 isset($zl['angenommen']) ? (int) $zl['angenommen'] : 0, isset($zl['abgelehnt']) ? (int) $zl['abgelehnt'] : 0,
+                 isset($zl['verworfen']) ? (int) $zl['verworfen'] : 0);
+    if (!empty($zu['letzter']) && is_array($zu['letzter'])) {
+        $t .= ' ' . sprintf(ev_t('BEFEHL.P_LETZTER'), ev_e((string) $zu['letzter']['name']),
+                            ev_e((string) $zu['letzter']['ergebnis']), max(0, time() - (int) $zu['letzter']['zeit']));
+    }
+    if (!empty($zl['verworfen'])) { $t .= ' ' . ev_t('BEFEHL.P_VERWORFEN'); }
+    return array(1, $t);
+}
+
+/** Die Zeilen von "befehlsbruecke.php --pruefen" (bb_pruefen()) fuer den Reiter Test; leer ohne Bruecke. */
+function ev_bruecke_pruefzeilen()
+{
+    if (!ev_bruecke_laden()) { return array(); }
+    ob_start();
+    bb_pruefen();
+    $aus = (string) ob_get_clean();
+    return array_values(array_filter(explode("\n", $aus), 'strlen'));
 }

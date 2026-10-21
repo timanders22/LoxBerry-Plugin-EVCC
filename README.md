@@ -9,6 +9,34 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.45
+
+Werte und Befehle über MQTT – der Weg des [LoxBerry-Plugins Musterprojekts](https://github.com/timanders22/LoxBerry-Plugins-Musterprojekt).
+Der Weg über HTTP (Vorlagen, Token, Endpunkt) wirkt unverändert weiter.
+
+* **Befehle über MQTT (Befehlsbrücke):** 15 Befehle je Ladepunkt unter `evcc2lox/befehl/lp<N>/…` (Lademodus,
+  Ladegrenzen, Ströme, Phasen, Priorität, Preisgrenze, Battery Boost, Ladeplan aus Ziel und Stunden, Energieziel,
+  Fahrzeug) und 7 für die Anlage (`batteriemodus`, `prioritaetssoc`, `puffersoc`, `residualleistung`,
+  `entladeregelung`, `netzladegrenze`, `netzladenaus`). Sie wirken nur mit zwei Haken: „Befehle über MQTT annehmen“
+  (Reiter **MQTT**, neu, ab Werk aus) und „Steuerung aus Loxone zulassen“ (Reiter **Einstellungen**). Geprüft wird
+  wie über den Endpunkt – Bereich, Befehlsbremse samt Nachreichen, Schreiber-Wache (Kennung `mqtt`). Preisgrenze,
+  Energieziel und Netzladegrenze mit `<v.3>`. Quittung auf `…/befehl/<name>/quittung`, Lebenszeichen
+  `evcc2lox/status/befehle`, neuer Knopf „Vorlage MQTT-Befehle“. EVCCs eigenes `evcc/…/set` nimmt das Plugin nicht.
+* **Lebenszeichen** `evcc2lox/status/ok`, `status/ts` und `status/zaehler` (0–999) alle 30 s, nie retained, auch
+  wenn EVCC nicht antwortet. Ausfallerkennung im Musterprojekt: Analogwertvalidierung an `evcc2lox_status_zaehler`,
+  Tmc 300 s; „EVCC stumm“ hängt an `evcc2lox_ok`. Kein Alter in Sekunden mehr aus `ts` rechnen (Ortszeit).
+* **−1/−999 statt „-“ oder 0, auch über HTTP:** Zustände ohne Aussage senden −1 (über MQTT auch Ja/Nein-Werte),
+  Preisgrenze und Preise −999, Preisrang, CO₂ und Solarprognose −1, Texte „-“. Messwerte (Leistungen, Energien,
+  Ladestand) bleiben 0, Ja/Nein über HTTP bleibt 0. **Wer in einer bestehenden HTTP-Anlage auf „= 0“ prüft, sieht
+  künftig −1 bzw. −999.** Die HTTP-Vorlage nimmt diese Werte an (MinVal).
+* **Reiter Einbindung in Loxone:** MQTT zuerst – Gateway V1 (Abo `evcc2lox/#` mitgeliefert in
+  `mqtt_subscriptions.cfg`, beim Präfixwechsel nachgeführt) und V2 mit Hakenliste (71 Datenpunkte), Namenstabelle
+  mit Kopierknopf statt Werte-Vorlage, Ausfallerkennung, Befehle; die vier Baustein-Listen mit Virtuellen Eingängen
+  und den Befehlen am Ausgang „LoxBerry MQTT-Gateway“, neue Bilder. Der Weg über HTTP steht zugeklappt darunter.
+* Deinstallation: tut nichts, wenn LoxBerry sie für ein anderes Plugin aufruft (dessen Name ein Anfang von „evcc“
+  ist); sie hält zuerst die Befehlsbrücke an und entfernt deren Zugangsdaten.
+* Geprüft unter PHP 7.4, 8.4 und 8.5 mit Attrappen, nicht am Gerät.
+
 ## Neu in 0.9.44
 
 * **Einbindung in Loxone:** Eingang En der Analogwertvalidierung (#21 „LoxBerry antwortet nicht“ auf der

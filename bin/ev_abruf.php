@@ -263,6 +263,15 @@ if (!flock($fh, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
+/* Gruppe 4 / MQTT (0.9.45, Entwurf ev 3.3): der Waechter der Befehlsbruecke - nach der Sperre, einmal je
+ * Cron-Lauf, in ev_bruecke_waechter() gekapselt (try/catch: ein Fehler haelt den Abruf nicht an). Er startet die
+ * Bruecke nur mit dem Haken "Befehle ueber MQTT annehmen", haelt sie sonst an und sendet <praefix>/status/befehle
+ * (nie retained). befehlsbruecke.sh schliesst alle geerbten Deskriptoren, der Dauerdienst haelt abruf.lock also
+ * nicht fest. Dazu das Gateway-Abo (config/mqtt_subscriptions.cfg) auf dem eingestellten Praefix halten - ein
+ * Update spielt die Konfiguration aus der Sicherung zurueck (ev_abo_datei(), E6). */
+ev_bruecke_waechter();
+ev_abo_datei(ev_config()['mqtt_topic'], true);
+
 $ev_kandidatdatei = ev_tmpdir() . '/apt_kandidat.txt';
 clearstatcache(true, $ev_kandidatdatei);
 if (!is_file($ev_kandidatdatei)

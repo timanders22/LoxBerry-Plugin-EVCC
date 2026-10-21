@@ -55,7 +55,20 @@ SICHER="$BASE/data/plugins/$PDIR.upgrade_sicherung"
 # Skripts ab. Ohne Marke ist das hier kein Update, das dieses Plugin
 # begonnen hat - dann wird nichts eingespielt, die Sicherung bleibt liegen.
 EV_MARKE="$BASE/data/plugins/$PDIR.upgrade_laeuft"
-trap 'rm -f "$EV_MARKE" 2>/dev/null' EXIT
+# Gruppe 4 / MQTT (0.9.45): nach dem Entfernen der Marke die Befehlsbruecke starten (startet nur mit dem Haken
+# "Befehle ueber MQTT annehmen", ab Werk aus; sonst sagt sie "Haken aus"). Im trap, damit es nach jedem Ausgang
+# dieses Skripts geschieht - die Marke faellt erst dort. Gelingt es nicht, startet sie der Minutentakt.
+ev_bruecke_start() {
+    BBSH="$BASE/bin/plugins/$PDIR/befehlsbruecke.sh"
+    [ -f "$BBSH" ] || return 0
+    BB_AUS=$(timeout 40 bash "$BBSH" start 2>&1 | head -n 1)
+    case "$BB_AUS" in
+        *gestartet*|*laeuft*) echo "<OK> Befehlsbruecke: $BB_AUS" ;;
+        "Haken aus - kein Start.") echo "<INFO> Befehlsbruecke: aus (Reiter MQTT, Haken 'Befehle ueber MQTT annehmen')." ;;
+        *) echo "<WARNING> Befehlsbruecke: $BB_AUS - der Minutentakt versucht es erneut." ;;
+    esac
+}
+trap 'rm -f "$EV_MARKE" 2>/dev/null; ev_bruecke_start' EXIT
 if [ ! -e "$EV_MARKE" ]; then
     echo "<WARNING> Es fehlt die Marke einer laufenden Aktualisierung ($EV_MARKE)."
     echo "<WARNING> Es wird nichts zurueckgespielt; eine Sicherung unter $SICHER bleibt liegen."

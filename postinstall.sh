@@ -76,6 +76,18 @@ fi
 # Zurueckspielen, das nie kommt (postupgrade.sh laeuft dort nicht), und bei
 # einem Update mit beschaedigter evcc.json kuendigte er ein neues Token an
 # (Pruefbericht installer, B3).
+# Gruppe 4 / MQTT (0.9.45): bei einer Neuinstallation die Befehlsbruecke starten (startet nur mit dem Haken
+# "Befehle ueber MQTT annehmen", ab Werk aus). Bei einem Update startet sie postupgrade.sh nach der Marke.
+BBSH="$BASE/bin/plugins/$PDIR/befehlsbruecke.sh"
+if [ ! -f "$BASE/data/plugins/$PDIR.upgrade_laeuft" ] && [ -f "$BBSH" ]; then
+    BB_AUS=$(timeout 40 bash "$BBSH" start 2>&1 | head -n 1)
+    case "$BB_AUS" in
+        *gestartet*|*laeuft*) echo "<OK> Befehlsbruecke: $BB_AUS" ;;
+        "Haken aus - kein Start.") echo "<INFO> Befehlsbruecke: aus (Reiter MQTT, Haken 'Befehle ueber MQTT annehmen')." ;;
+        *) echo "<WARNING> Befehlsbruecke: $BB_AUS - der Minutentakt versucht es erneut." ;;
+    esac
+fi
+
 if [ -f "$BASE/data/plugins/$PDIR.upgrade_laeuft" ]; then
     echo "<OK> Aktualisierung: postupgrade.sh spielt Einstellungen und Zugriffstoken gleich"
     echo "<OK> zurueck. Es ist nichts neu einzutragen."
