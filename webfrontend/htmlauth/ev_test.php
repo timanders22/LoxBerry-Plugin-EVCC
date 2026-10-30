@@ -425,6 +425,10 @@ function ev_pruefungen()
      * Erzeugnis wie im Waechter. Aus (Haken) ist ein Hinweis, kein Kreuz. */
     list($ev_nok, $ev_ntext) = ev_mqtt_namen_probe();
     $z[] = ev_pruefzeile($ev_nok, ev_t('TEST.F_NAMEN'), $ev_ntext);
+    /* Nachtwelle N6 (0.9.48): stehen unter MQTT-Gateway V2 die Haken der Hakenliste mit dem richtigen Noncached?
+       Liest config/system/subscriptions.json; unter V1 und bei ausgeschaltetem MQTT ein Hinweis. */
+    list($ev_v2s, $ev_v2t) = ev_v2_haken_lage($cfg);
+    $z[] = ev_pruefzeile($ev_v2s === 2 ? -1 : $ev_v2s, ev_t('TEST.F_V2_HAKEN'), ev_e($ev_v2t));
     list($ev_bok, $ev_btext) = ev_pruef_bruecke();
     $z[] = ev_pruefzeile($ev_bok, ev_t('TEST.F_BRUECKE'), $ev_btext);
 

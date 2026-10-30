@@ -150,6 +150,29 @@ if ($ev_post && isset($_POST['testaktion'])) {
     $ev_tab = 'tab-test';
 }
 
+/* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): die Knoepfe "Testansage an Ziel n" schicken ansage_test_ziel=n - es spricht
+ * nur dieses Ziel; der bisherige Knopf spricht an alle Ziele gleichzeitig. Eine unbrauchbare Nummer spricht nichts. */
+if ($ev_post && (isset($_POST['ansage_test']) || isset($_POST['ansage_test_ziel']))) {
+    $ev_tk = ev_ansage_k();
+    $ev_tnur = (isset($_POST['ansage_test_ziel']) && ev_mit_zielen()) ? ansage_test_ziel($_POST) : 0;
+    if (isset($_POST['ansage_test_ziel']) && $ev_tnur === 0) {
+        $ev_tr = array('stand' => 0, 'kennung' => 'ZIEL_UNBEKANNT|-', 'art' => '-', 'http' => 0, 'zeile' => '', 'zeichen' => 0);
+    } elseif ($ev_tnur >= 1) {
+        $ev_tr = ansage_testansage(ev_tts(ev_config()), $ev_tk, $ev_tnur);
+    } else {
+        $ev_tr = ansage_testansage(ev_tts(ev_config()), $ev_tk);
+    }
+    ev_log('Testansage' . ($ev_tnur >= 1 ? ' an Ziel ' . $ev_tnur : '') . ': ' . ansage_kurz($ev_tr));
+    if ($ev_tr['stand'] === 1) {
+        $ev_meldungen[] = ev_e(ev_t('DURCHSAGE.M_TEST_OK'));
+    } elseif ($ev_tr['stand'] === -1) {
+        $ev_meldungen[] = sprintf(ev_e(ev_t('DURCHSAGE.M_TEST_NICHTS')), ev_e(ansage_kennung_text($ev_tr['kennung'], $ev_tk)));
+    } else {
+        $ev_fehler[] = sprintf(ev_e(ev_t('DURCHSAGE.M_TEST_FEHL')), ev_e(ansage_kennung_text($ev_tr['kennung'], $ev_tk)));
+    }
+    $ev_tab = 'tab-test';
+}
+
 /* ================= Einstellungen speichern =================
    Beanstandungen werden GESAMMELT, nicht ueberschrieben: eine einzelne
    Zuweisung verschluckt die vorherigen, und der Benutzer korrigiert dann
@@ -262,10 +285,12 @@ if ($ev_post && isset($_POST['speichern'])) {
      * Sprechtoken steht in einer Meldung, ein leeres Tokenfeld heisst "behalten". */
     $ev_tmangel = array();
     $ev_tbean = array();
+    $ev_thl = array();     // Welle Mehrfach-Ziele (0.9.48): Hinweise des Moduls, nach dem Speichern (escaped) in die Meldungen
+    $ev_thinw = array();     // Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Hinweise des Moduls, die das Speichern nicht verhindern
     $ev_tneu = ansage_formular_lesen($_POST, ev_tts($ev_cfg), $ev_tmangel, $ev_tbean,
-                                     array('modi' => ev_ansage_modi()), ev_ansage_k());
+                                     array('modi' => ev_ansage_modi(), 'ziele' => ev_mit_zielen()), ev_ansage_k(), $ev_thinw);
     foreach ($ev_tmangel as $ev_tm) { $ev_fehler[] = ev_e($ev_tm['text']); }
-    foreach ($ev_tbean as $ev_tb) { $ev_bean[] = $ev_tb; }
+    foreach ($ev_tbean as $ev_tb) { $ev_bean[] = ev_ziele_x2_name($ev_tb); }     // 0.9.48: name[N] -> name.N
     if (!$ev_tmangel) { $ev_cfg['tts'] = $ev_tneu; }
     foreach (ev_ansage_anlaesse() as $ev_ak) { $ev_cfg[$ev_ak] = isset($_POST[$ev_ak]) ? 1 : 0; }
 
@@ -276,6 +301,8 @@ if ($ev_post && isset($_POST['speichern'])) {
     if (!$ev_fehler) {
         if (ev_config_write($ev_cfg)) {
             $ev_meldungen[] = ev_t('EINST.GESPEICHERT');
+            foreach ($ev_thinw as $ev_th) { $ev_thl[] = $ev_th['text']; }     // Welle Mehrfach-Ziele: erst nach dem Speichern
+            foreach ($ev_thl as $ev_th1) { $ev_meldungen[] = ev_e($ev_th1); }
             ev_log('Einstellungen gespeichert');
             /* Gruppe 4 / MQTT (0.9.45): die Befehlsbruecke sofort schalten (Entwurf ev 3.3). */
             $ev_bruecke_melden = true;
@@ -825,9 +852,12 @@ if ($ev_link !== $ev_cfg['url']) { ?>
 </div>
 <?= ansage_formular_html(ev_tts($ev_cfg), array(
     'w' => function ($n, $g) { return ev_eingabe('speichern', $n, $g); },
-    'm' => function ($n) { return ev_markierung('speichern', $n); },
+    'm' => function ($n) { return ev_markierung('speichern', ev_ziele_x2_name($n)); },     // 0.9.48: name[N] -> name.N
     'c' => function ($n, $g) { return !empty(ev_eingabe('speichern', $n, $g)); },
-    'modi' => ev_ansage_modi()), ev_ansage_k()) ?>
+    'modi' => ev_ansage_modi(),
+    /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Tabelle der weiteren Ausgabeziele; nach einer Beanstandung traegt sie das Eingetippte. */
+    'ziele' => ev_mit_zielen(),
+    'ziele_post' => ev_eingaben_aktiv('speichern') ? ev_ziele_x2_post($ev_eingaben['werte']) : null), ev_ansage_k()); ?>
 
 <h2><?= ev_e(ev_t('EINST.H_UPDATE')) ?></h2>
 <div class="sm-warnung"><?= ev_t('EINST.H_UPDATE_TEXT') ?></div>
@@ -1053,9 +1083,9 @@ $ev_gn = function ($t) { return '<span class="sm-mono">' . ev_e(ev_mqtt_gateway_
 <div class="sm-hinweis"><?= sprintf(ev_t('LOX.M_S2_V2'), '<span class="sm-mono">' . ev_e($ev_gpraefix) . '</span>') ?></div>
 <details open><summary><?= ev_e(sprintf(ev_t('LOX.M_HAKEN_AUF'), count($ev_haken))) ?></summary>
 <table class="sm-tbl">
-<tr><th style="width:34px;">#</th><th><?= ev_e(ev_t('LOX.M_T_THEMA')) ?></th><th><?= ev_e(ev_t('LOX.M_T_NAME')) ?></th><th><?= ev_e(ev_t('LOX.M_T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('LOX.M_T_ART')) ?></th></tr>
+<tr><th style="width:34px;">#</th><th><?= ev_e(ev_t('LOX.M_T_THEMA')) ?></th><th><?= ev_e(ev_t('LOX.M_T_NAME')) ?></th><th><?= ev_e(ev_t('LOX.M_T_BEDEUTUNG')) ?></th><th><?= ev_e(ev_t('LOX.M_T_ART')) ?></th><th><?= ev_e(ev_t('LOX.M_T_NONCACHED')) ?></th></tr>
 <?php foreach ($ev_haken as $ev_hi => $ev_hz) { ?>
-<tr><td><?= (int) $ev_hi + 1 ?></td><td><span class="sm-mono"><?= ev_e($ev_hz[0]) ?></span></td><td><span class="sm-mono"><?= ev_e($ev_hz[1]) ?></span></td><td><?= ev_e($ev_hz[2]) ?></td><td><?= ev_e(ev_t($ev_hz[3] === 'text' ? 'LOX.M_ART_TEXT' : 'LOX.M_ART_ZAHL')) ?></td></tr>
+<tr><td><?= (int) $ev_hi + 1 ?></td><td><span class="sm-mono"><?= ev_e($ev_hz[0]) ?></span></td><td><span class="sm-mono"><?= ev_e($ev_hz[1]) ?></span></td><td><?= ev_e($ev_hz[2]) ?></td><td><?= ev_e(ev_t($ev_hz[3] === 'text' ? 'LOX.M_ART_TEXT' : 'LOX.M_ART_ZAHL')) ?></td><td><?= ev_e(ev_t($ev_hz[4] ? 'LOX.M_NC_JA' : 'LOX.M_NC_NEIN')) ?></td></tr>
 <?php } ?>
 </table>
 </details>
@@ -1473,7 +1503,8 @@ $ev_bs_seiten = array(
 <tr><td><?= $ev_gn($ev_sf) ?></td><td><?= ev_t('SPOT.' . $ev_sk) ?></td></tr>
 <?php } ?>
 </table>
-<div class="sm-hinweis"><?= ev_t('SPOT.RANG_REZEPT') ?></div>
+<div class="sm-hinweis"><?= sprintf(ev_t('SPOT.RANG_REZEPT'), $ev_gn('preis_ok'), $ev_gn('preis_rang'),
+    $ev_gn('preis_ok')) ?></div>
 </div>
 
 <div class="sm-step"><b><?= ev_e(ev_t('SPOT.H_GRENZE')) ?></b><br>
@@ -1487,7 +1518,7 @@ $ev_bs_seiten = array(
 </div>
 
 <div class="sm-step"><b><?= ev_e(ev_t('SPOT.H_REZEPT')) ?></b><br>
-<?= ev_t('SPOT.REZEPT') ?>
+<?= sprintf(ev_t('SPOT.REZEPT'), $ev_gn('tarif_netz'), $ev_gn('lp1_smartcost_aktiv')) ?>
 <div class="sm-warnung"><?= ev_t('SPOT.WARNUNG') ?></div>
 </div>
 <?php } ?>
@@ -1749,6 +1780,13 @@ if ($ev_tab === 'tab-test') {
   <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="ansage">
   <button data-role="none" class="sm-btn sm-b-aktion" type="submit"><?= ev_e(ev_t('DURCHSAGE.K_TEST')) ?></button></form>
+<?php /* Welle Mehrfach-Ziele (0.9.48): eigenes Formular - das versteckte testaktion=ansage oben reiste sonst mit. */ ?>
+<form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
+  <?php echo ev_fmt(); ?>
+<?php /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): je weiteres Ziel ein Knopf "Testansage an Ziel n (Geraet (Plugin))";
+   ohne weitere Ziele nichts. */
+if (ev_mit_zielen()) { echo ansage_testknoepfe_html(ev_tts(ev_config()), ev_ansage_k(), array('klasse' => 'sm-btn sm-b-aktion')); } ?>
+</form>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
   <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="mqtt">

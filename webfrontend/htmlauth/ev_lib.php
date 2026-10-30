@@ -36,8 +36,9 @@ date_default_timezone_set('Europe/Berlin');
 define('EV_LADEPUNKTE', 4);
 /** Anzahl der Fahrzeuge, fuer die Felder erzeugt werden. */
 define('EV_FAHRZEUGE', 4);
-/* Gemeinsame Sprachausgabe (Abschrift von Werkzeuge/gemeinsam/sprachausgabe.php, Nr. 36 b). Liegt
- * neben dieser Datei; die Datei schuetzt sich selbst gegen doppeltes Laden. */
+/* Gemeinsame Sprachausgabe (Abschrift von Werkzeuge/gemeinsam/sprachausgabe.php, Nr. 36 b; seit 0.9.48 Stamm 1.2.1
+ * mit weiteren Ausgabezielen, ev_mit_zielen(), Welle Mehrfach-Ziele). Liegt neben dieser Datei; die Datei schuetzt sich
+ * selbst gegen doppeltes Laden. */
 require_once __DIR__ . '/sprachausgabe.php';
 
 /* ==================================================================
@@ -3546,6 +3547,8 @@ function ev_eingabe_felder()
     );
     /* Nr. 36 b: Felder und Anlaesse der Ansage; die Sprechtoken als 'geheim' (reisen nie mit). */
     foreach (ev_ansage_x2() as $ev_n => $ev_a) { $ev_l['speichern'][$ev_n] = $ev_a; }
+    // Welle Mehrfach-Ziele (0.9.48): die Tabelle der weiteren Ziele, flach als name.N
+    foreach (ev_ziele_x2_felder() as $ev_n) { $ev_l['speichern'][$ev_n] = 'text'; }
     return $ev_l;
 }
 
@@ -3559,6 +3562,14 @@ function ev_eingaben_sammeln($formular, $beanstandet)
         if ($art === 'geheim') { continue; }            // nie mitnehmen
         if ($art === 'haken') {
             $werte[$k] = isset($_POST[$k]) ? 1 : 0;
+        } elseif (strpos($k, '.') !== false) {
+            /* Welle Mehrfach-Ziele (0.9.48): die Tabelle kommt als name[N] und reist flach als name.N - nur, was
+             * gesendet wurde (ein fehlender Haken bleibt aus). */
+            $zt = explode('.', $k, 2);
+            if (isset($_POST[$zt[0]]) && is_array($_POST[$zt[0]]) && isset($_POST[$zt[0]][$zt[1]])
+                && is_string($_POST[$zt[0]][$zt[1]])) {
+                $werte[$k] = (string) $_POST[$zt[0]][$zt[1]];
+            }
         } else {
             $werte[$k] = (isset($_POST[$k]) && is_string($_POST[$k])) ? (string) $_POST[$k] : '';
         }
@@ -4974,7 +4985,22 @@ function ev_sicherung_lesen($roh)
                 continue;
             }
             $ev_tj = ev_tts(ev_config());
-            list($ev_tv) = ansage_vervollstaendigen($ev_tp + $ev_tj);
+            /* Welle Mehrfach-Ziele (0.9.48): "$ev_tp + $ev_tj" behielt die geltenden weiteren Ziele einer Sicherung ohne
+             * Liste schon bisher - still. Jetzt geht der Block vorher durch die Spaetliste, und der Hinweis nennt sie. */
+            $ev_tneu = array('tts' => $ev_tp);
+            $ev_tjetzt = array('tts' => $ev_tj);
+            $ev_zspaet = array();
+            /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1, Spaetliste): fehlt die Liste der weiteren Ziele in der Sicherung (Datei einer
+             * aelteren Fassung), gelten die jetzigen weiteren Ziele weiter - genannt im Hinweis. Eine Sicherung MIT leerer Liste
+             * heisst "keine weiteren Ziele" und wird so uebernommen. */
+            $ev_spaete = array();
+            if (isset($ev_tneu['tts']) && is_array($ev_tneu['tts']) && function_exists('ansage_sicherung_spaet')) {
+                list($ev_tneu['tts'], $ev_spaete) = ansage_sicherung_spaet($ev_tneu['tts'],
+                    (isset($ev_tjetzt['tts']) && is_array($ev_tjetzt['tts'])) ? $ev_tjetzt['tts'] : null);
+            }
+            foreach ($ev_spaete as $ev_sn) { $ev_zspaet[] = $ev_sn; }     // Welle Mehrfach-Ziele: tts.ziele (Spaetliste)
+            if ($ev_zspaet) { $hinweise[] = sprintf(ev_t('EINST.SICH_SPAET'), ev_e(implode(', ', $ev_zspaet))); }
+            list($ev_tv) = ansage_vervollstaendigen($ev_tneu['tts'] + $ev_tj);
             $neu['tts'] = ansage_sicherung_tokens_behalten($ev_tv, $ev_tj);
             $anzahl++;
             continue;
@@ -5119,7 +5145,50 @@ if (!defined('EV_ANSAGE_AUSFALL_S')) { define('EV_ANSAGE_AUSFALL_S', 300); }
 /** Erlaubte Ausgabearten: alle des Moduls ausser 'audioserver' (kein Antwortweg zu Loxone im Abrufdienst). */
 function ev_ansage_modi()
 {
-    return array('aus', 'musicserver', 'ms4h', 'custom', 'alexang', 'cc4lox');
+    /* Nachtwelle N6 (0.9.48, Pflegewelle 22): dazu Sonos4Lox und, ab Modul 1.1.4, SonoX (ungemessen, kein Sonos im
+     * Haus; das Modul prueft Installation und Zone bzw. Raum). Weitere Ausgabeziele (Tabelle, 'ziele') seit 0.9.48
+     * mit Stamm 1.2.1 - ev_mit_zielen() unten; ohne Tabelle wie 1.1.4. Die Fassungspruefung schuetzt vor einer zuerst
+     * geladenen aelteren Abschrift (Modul 1.1.4, Kopf "Wer 'sonox' anbietet"). */
+    $m = array('aus', 'musicserver', 'ms4h', 'custom', 'alexang', 'cc4lox', 'sonos4lox');
+    if (defined('ANSAGE_FASSUNG') && version_compare(ANSAGE_FASSUNG, '1.1.4', '>=')) { $m[] = 'sonox'; }
+    return $m;
+}
+
+/** Welle Mehrfach-Ziele (Sprachmodul 1.2.1): bietet diese Linie die Tabelle der weiteren Ausgabeziele an? Nur, wenn die
+ *  geladene Abschrift sie kann - laden zwei Abschriften im selben Prozess, gilt die zuerst geladene. */
+function ev_mit_zielen() {
+    return version_compare(ANSAGE_FASSUNG, '1.2.0', '>=') && function_exists('ansage_ziele_html')
+        && function_exists('ansage_ziele_pruefen') && function_exists('ansage_testknoepfe_html');
+}
+
+/** Welle Mehrfach-Ziele (Sprachmodul 1.2.1), X-2 mit flachen Schluesseln (name.N): die Felder der Tabelle heissen im
+ *  Formular name[N] (N = 2..6, ansage_ziel_feldnamen()). ev_ziele_x2_name() macht daraus name.N (Beanstandung und
+ *  Markierung), ev_ziele_x2_post() aus den gesammelten Eingaben wieder das POST der Tabelle (ziele_post). */
+function ev_ziele_x2_name($n) {
+    return is_string($n) ? (string) preg_replace('/^(tts_ziel_[a-z]+)\[([2-9])\]\z/', '$1.$2', $n) : $n;
+}
+function ev_ziele_x2_post(array $werte) {
+    $p = array();
+    foreach ($werte as $k => $v) {
+        if (is_string($v) && preg_match('/^(tts_ziel_[a-z]+)\.([2-9])\z/', (string) $k, $m)) { $p[$m[1]][(int) $m[2]] = $v; }
+    }
+    return isset($p['tts_ziel_art']) ? $p : null;
+}
+
+/** Welle Mehrfach-Ziele (0.9.48): die Felder der Tabelle in der Einmalmeldung (X-2), flach name.N fuer N = 2..6 -
+ *  nur, wenn die geladene Abschrift die Tabelle kann. */
+function ev_ziele_x2_felder()
+{
+    $f = array();
+    if (ev_mit_zielen()) {
+        for ($i = 2; $i <= 6; $i++) {
+            foreach (array('tts_ziel_art', 'tts_ziel_wo', 'tts_ziel_laut', 'tts_ziel_sprache', 'tts_ziel_ein',
+                           'tts_ziel_loeschen') as $n) {
+                $f[] = $n . '.' . $i;
+            }
+        }
+    }
+    return $f;
 }
 
 /** Die Anlaesse: Kennung => Konfigurationsschluessel. */
@@ -5916,6 +5985,7 @@ function ev_mqtt_namen($praefix = null)
     if ($praefix === null) { $praefix = ev_mqtt_praefix(); }
     $muster = array_flip(ev_mqtt_im_muster());
     $nicht = array_flip(ev_mqtt_nicht_senden());
+    $nc = ev_mqtt_noncached();
     $aus = array();
     foreach (ev_felder() as $n => $d) {
         if (isset($nicht[$n])) { continue; }
@@ -5930,7 +6000,7 @@ function ev_mqtt_namen($praefix = null)
                                                                       $d['max'], (string) $d['einheit']),
                        'ohne' => ($ow === null) ? '0' : (string) $ow,
                        'retained' => (bool) ev_retain_fuer($n), 'im_muster' => isset($muster[$n]),
-                       'haken' => isset($muster[$n]));
+                       'haken' => isset($muster[$n]), 'noncached' => in_array($n, $nc, true));
     }
     $zusatz = array(
         'ts'             => array('BEFEHL.TH_TS', '0 … 2000000000 s'),
@@ -5942,22 +6012,165 @@ function ev_mqtt_namen($praefix = null)
     foreach ($zusatz as $t => $x) {
         $aus[] = array('thema' => $t, 'name' => ev_mqtt_gateway_name($t, $praefix), 'bedeutung' => ev_t($x[0]),
                        'art' => 'zahl', 'bereich' => $x[1], 'ohne' => '–', 'retained' => false,
-                       'im_muster' => isset($muster[$t]), 'haken' => isset($muster[$t]) || $t === 'status/befehle');
+                       'im_muster' => isset($muster[$t]), 'haken' => isset($muster[$t]) || $t === 'status/befehle',
+                       'noncached' => in_array($t, $nc, true));
     }
     return $aus;
 }
 
-/** Hakenliste fuer Gateway V2 (Entwurf ev 2.4): ab Werk 67 Zahlen und 2 Texte der Musterseiten,
- *  status/zaehler und status/befehle - 71 Haken. Kein Thema braucht "Noncached" oder "Zuruecksetzen
- *  nach Senden". Je Zeile array(Thema voll, Name, Bedeutung, art). */
+/** Noncached unter Gateway V2 (Nachtwelle N6, Nachtrag 29.10.): das Lebenszeichen ok, status/ok und status/befehle -
+ *  V2 reicht einen gleichbleibenden Wert nach einem Neustart des Miniservers sonst nicht neu weiter. EINE Quelle fuer
+ *  Namenstabelle, Hakenliste (Spalte Noncached) und Selbsttest. */
+function ev_mqtt_noncached()
+{
+    return array('ok', 'status/ok', 'status/befehle');
+}
+
+/** Hakenliste fuer Gateway V2 (Entwurf ev 2.4): ab Werk 67 Zahlen und 2 Texte der Musterseiten (beide mit
+ *  Texteingang), status/zaehler und status/befehle - 71 Haken. Noncached seit 0.9.48: ok und status/befehle
+ *  (ev_mqtt_noncached()); kein Thema braucht "Zuruecksetzen nach Senden". Je Zeile array(Thema voll, Name,
+ *  Bedeutung, art, noncached). */
 function ev_mqtt_hakenliste()
 {
     $p = ev_mqtt_praefix();
     $aus = array();
     foreach (ev_mqtt_namen($p) as $z) {
-        if ($z['haken']) { $aus[] = array($p . '/' . $z['thema'], $z['name'], $z['bedeutung'], $z['art']); }
+        if ($z['haken']) {
+            $aus[] = array($p . '/' . $z['thema'], $z['name'], $z['bedeutung'], $z['art'], $z['noncached']);
+        }
     }
     return $aus;
+}
+
+/* ---------------- Gateway V2: Selbsttest der Haken (Nachtwelle N6, 0.9.48) ---------------- */
+
+/**
+ * Die Abos des MQTT-Gateways V2 aus config/system/subscriptions.json (Subscriptions[].Id je Thema, Noncached):
+ * array(Thema => Noncached ja/nein), null = nicht lesbar. Form wie MGiSmart 1.1.28 mg_v2_abos() und Govee 0.9.30
+ * gv_mqtt_v2_haken_lage(); die Datei liest ev_v2_haken_lage().
+ */
+function ev_v2_abos($daten)
+{
+    if (!is_array($daten)) {
+        return null;
+    }
+    $liste = array();
+    foreach (array('Subscriptions', 'subscriptions') as $s) {
+        if (isset($daten[$s]) && is_array($daten[$s])) {
+            $liste = $daten[$s];
+            break;
+        }
+    }
+    $abo = array();
+    foreach ($liste as $e) {
+        if (!is_array($e)) {
+            continue;
+        }
+        $id = '';
+        foreach (array('Id', 'id', 'Topic', 'topic') as $k) {
+            if (isset($e[$k]) && is_string($e[$k])) {
+                $id = $e[$k];
+                break;
+            }
+        }
+        if ($id === '') {
+            continue;
+        }
+        $nc = false;
+        foreach (array('Noncached', 'noncached') as $k) {
+            if (isset($e[$k])) {
+                $nc = ($e[$k] === true || in_array(strtolower(trim((string) $e[$k])), array('1', 'true', 'yes', 'on'), true));
+            }
+        }
+        $abo[$id] = $nc;
+    }
+    return $abo;
+}
+
+/**
+ * Soll gegen Ist, rein (liest nichts): array(1|0, fehlt[], noncached_fehlt[], noncached_zu_viel[], angehakt, soll).
+ * Soll je Zeile array('thema' => volles Thema, 'name' => Gateway-Name, 'noncached' => bool). Noncached wird in
+ * beide Richtungen verglichen: fehlt es, reicht das Gateway einen gleichen Wert nicht weiter; steht es zu viel, geht
+ * jeder Wert erneut an den Miniserver.
+ */
+function ev_v2_haken_abgleich(array $soll, array $abo)
+{
+    $fehlt = array();
+    $nc_fehlt = array();
+    $nc_zuviel = array();
+    $da = 0;
+    foreach ($soll as $e) {
+        if (!array_key_exists($e['thema'], $abo)) {
+            $fehlt[] = $e['name'];
+            continue;
+        }
+        $da++;
+        if ($e['noncached'] && !$abo[$e['thema']]) {
+            $nc_fehlt[] = $e['name'];
+        } elseif (!$e['noncached'] && $abo[$e['thema']]) {
+            $nc_zuviel[] = $e['name'];
+        }
+    }
+    return array(($fehlt || $nc_fehlt || $nc_zuviel) ? 0 : 1, $fehlt, $nc_fehlt, $nc_zuviel, $da, count($soll));
+}
+
+/**
+ * Das Soll fuer den Selbsttest: ev_mqtt_hakenliste() - DIESELBE Funktion wie die Hakenliste im Reiter "Einbindung in Loxone"
+ * (Regeln/07), mit ihren Textthemen (die Musterseiten haben dafuer Texteingaenge) und Noncached aus ev_mqtt_noncached().
+ */
+function ev_v2_haken_soll()
+{
+    $aus = array();
+    foreach (ev_mqtt_hakenliste() as $z) {
+        $aus[] = array('thema' => $z[0], 'name' => $z[1], 'noncached' => (bool) $z[4]);
+    }
+    return $aus;
+}
+
+/**
+ * Selbsttestzeile "Gateway V2: sind alle Datenpunkte der Hakenliste angehakt?" (Nachtwelle N6, Vorschrift Punkt 4):
+ * array(1|0|2, Text ohne Markup). 1 alle Haken da und Noncached wie in der Hakenliste; 0 es fehlt ein Haken oder
+ * Noncached stimmt nicht (mit Namen); 2 trifft nicht zu (MQTT dieses Plugins aus, Gateway V1) oder nicht
+ * feststellbar (Fassung 0, keine Wurzel, subscriptions.json nicht lesbar). Liest nur.
+ */
+function ev_v2_haken_lage($cfg = null)
+{
+    if ($cfg === null) {
+        $cfg = ev_config();
+    }
+    if (empty($cfg['mqtt_ein'])) {
+        return array(2, ev_t('TEST.V2_AUS'));
+    }
+    $m = ev_mqtt_zustand();
+    $fassung = (int) $m['fassung'];
+    $home = (string) ev_paths()['home'];
+    if ($fassung === 0 || $home === '') {
+        return array(2, ev_t('TEST.V2_UNKLAR'));
+    }
+    if ($fassung < 2) {
+        return array(2, ev_t('TEST.V2_V1'));
+    }
+    $abo = ev_v2_abos(@json_decode((string) @file_get_contents($home . '/config/system/subscriptions.json'), true));
+    if ($abo === null) {
+        return array(2, ev_t('TEST.V2_UNKLAR'));
+    }
+    $liste = ev_v2_haken_soll();
+    if (!$liste) {
+        return array(2, ev_t('TEST.V2_LEER'));   // leere Hakenliste: kein Urteil (Hausform wie N7)
+    }
+    list($ok, $fehlt, $nc_fehlt, $nc_zuviel, $da, $soll) = ev_v2_haken_abgleich($liste, $abo);
+    $txt = sprintf(ev_t('TEST.V2_ZAHL'), $da, $soll);
+    if ($fehlt) {
+        $txt .= ' ' . sprintf(ev_t('TEST.V2_FEHLT'), implode(', ', array_slice($fehlt, 0, 12))
+            . (count($fehlt) > 12 ? ' …' : ''));
+    }
+    if ($nc_fehlt) {
+        $txt .= ' ' . sprintf(ev_t('TEST.V2_NC_FEHLT'), implode(', ', $nc_fehlt));
+    }
+    if ($nc_zuviel) {
+        $txt .= ' ' . sprintf(ev_t('TEST.V2_NC_ZUVIEL'), implode(', ', $nc_zuviel));
+    }
+    return array($ok, $txt);
 }
 
 /**
