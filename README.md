@@ -9,6 +9,10 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.49
+
+Bilder der Einbindung erneuert: Das Bild der Hauptseite „EVCC“ zeigt die neu angeordnete Seite. Sonst keine Änderung gegen 0.9.48.
+
 ## Neu in 0.9.48
 
 Pflegefassung der Nachtwelle (29.10.2026): die gemeinsamen Module auf dem Hausstand. Werte, Themen und Befehle bleiben,
