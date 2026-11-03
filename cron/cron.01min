@@ -43,10 +43,13 @@ fi
 
 ERR="$LOGD/cron.err"
 mkdir -p "$LOGD" 2>/dev/null
-if [ -e "$ERR" ] && [ ! -w "$ERR" ]; then
+# 0.9.50 (Nachzug 01.11.2026, Bauart Renault NG 2.1.23): touch allein genuegt nicht - es gelingt auch auf einem
+# Verzeichnis und, beim Eigentuemer, auf einer schreibgeschuetzten Datei. Bis 0.9.49 brach dann die Umlenkung
+# den Befehl ab, BEVOR er startete.
+if [ -e "$ERR" ] && { [ ! -f "$ERR" ] || [ ! -w "$ERR" ]; }; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Cron: $ERR ist nicht beschreibbar - Fehlermeldungen des Abrufs gehen verloren." >> "$LOGD/evcc.log" 2>/dev/null
     ERR=/dev/null
 else
-    touch "$ERR" 2>/dev/null
+    touch "$ERR" 2>/dev/null || ERR=/dev/null
 fi
 php "$BIN/ev_abruf.php" cron >/dev/null 2>>"$ERR"

@@ -158,9 +158,9 @@ if ($ev_post && (isset($_POST['ansage_test']) || isset($_POST['ansage_test_ziel'
     if (isset($_POST['ansage_test_ziel']) && $ev_tnur === 0) {
         $ev_tr = array('stand' => 0, 'kennung' => 'ZIEL_UNBEKANNT|-', 'art' => '-', 'http' => 0, 'zeile' => '', 'zeichen' => 0);
     } elseif ($ev_tnur >= 1) {
-        $ev_tr = ansage_testansage(ev_tts(ev_config()), $ev_tk, $ev_tnur);
+        $ev_tr = ansage_testansage(ev_ansage_vor_ort(), $ev_tk, $ev_tnur);
     } else {
-        $ev_tr = ansage_testansage(ev_tts(ev_config()), $ev_tk);
+        $ev_tr = ansage_testansage(ev_ansage_vor_ort(), $ev_tk);
     }
     ev_log('Testansage' . ($ev_tnur >= 1 ? ' an Ziel ' . $ev_tnur : '') . ': ' . ansage_kurz($ev_tr));
     if ($ev_tr['stand'] === 1) {
@@ -288,7 +288,8 @@ if ($ev_post && isset($_POST['speichern'])) {
     $ev_thl = array();     // Welle Mehrfach-Ziele (0.9.48): Hinweise des Moduls, nach dem Speichern (escaped) in die Meldungen
     $ev_thinw = array();     // Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Hinweise des Moduls, die das Speichern nicht verhindern
     $ev_tneu = ansage_formular_lesen($_POST, ev_tts($ev_cfg), $ev_tmangel, $ev_tbean,
-                                     array('modi' => ev_ansage_modi(), 'ziele' => ev_mit_zielen()), ev_ansage_k(), $ev_thinw);
+                                     array('modi' => ev_ansage_modi(), 'ziele' => ev_mit_zielen(), 'token_vor_ort' => true, 'aus_gewinnt' => true), ev_ansage_k(), $ev_thinw);
+    list($ev_cfg['ansage_regeln']) = ansage_regeln_formular($_POST, ev_ansage_regeln($ev_cfg), array(), $ev_tmangel, $ev_tbean, ev_ansage_k());     // S2: Wann gesprochen wird (Stamm)
     foreach ($ev_tmangel as $ev_tm) { $ev_fehler[] = ev_e($ev_tm['text']); }
     foreach ($ev_tbean as $ev_tb) { $ev_bean[] = ev_ziele_x2_name($ev_tb); }     // 0.9.48: name[N] -> name.N
     if (!$ev_tmangel) { $ev_cfg['tts'] = $ev_tneu; }
@@ -858,6 +859,11 @@ if ($ev_link !== $ev_cfg['url']) { ?>
     /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Tabelle der weiteren Ausgabeziele; nach einer Beanstandung traegt sie das Eingetippte. */
     'ziele' => ev_mit_zielen(),
     'ziele_post' => ev_eingaben_aktiv('speichern') ? ev_ziele_x2_post($ev_eingaben['werte']) : null), ev_ansage_k()); ?>
+<?= ansage_regeln_html(ev_ansage_regeln($ev_cfg), array(), array(), array(
+    'w' => function ($n, $g) { return ev_eingabe('speichern', $n, $g); },
+    'm' => function ($n) { return ev_markierung('speichern', ev_ziele_x2_name($n)); },
+    'c' => function ($n, $g) { return !empty(ev_eingabe('speichern', $n, $g)); },
+    'token_vor_ort' => true), ev_ansage_k()) ?>
 
 <h2><?= ev_e(ev_t('EINST.H_UPDATE')) ?></h2>
 <div class="sm-warnung"><?= ev_t('EINST.H_UPDATE_TEXT') ?></div>
@@ -1787,6 +1793,7 @@ if ($ev_tab === 'tab-test') {
    ohne weitere Ziele nichts. */
 if (ev_mit_zielen()) { echo ansage_testknoepfe_html(ev_tts(ev_config()), ev_ansage_k(), array('klasse' => 'sm-btn sm-b-aktion')); } ?>
 </form>
+<?= ev_ansage_lage_html() ?>
 <form action="index.php" method="post"><input data-role="none" type="hidden" name="activetab" value="tab-test">
   <?php echo ev_fmt(); ?>
   <input data-role="none" type="hidden" name="testaktion" value="mqtt">

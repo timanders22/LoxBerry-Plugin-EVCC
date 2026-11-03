@@ -9,6 +9,17 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.50
+
+**Ab dieser Fassung sind die Sprachansagen ab Werk an, auch nach einem Update, wenn Sie die Ausgabeart nie gespeichert haben.** Eine gespeicherte Einstellung bleibt, wie sie ist, auch „aus“. **Ausschalten:** Reiter *Einstellungen*, Abschnitt Sprachausgabe, Ausgabeart **„aus“** wählen und speichern; das bleibt auch nach jedem weiteren Update aus.
+
+* **Was angesagt wird:** EVCC liefert keine Daten mehr, Startfehler, Ladung fertig, jeder Anlass mit eigenem Haken; nachts schweigt alles davon.
+* **Wohin:** ab Werk zugleich Loxone Music Server (braucht seine Adresse), Google-Lautsprecher über Chromecast4lox (braucht dort ein Standardgerät oder hier den Namen) und Amazon Echo über Alexa-NG. Ein Ziel, das nicht bereitsteht, wird ohne Fehler übergangen; der Reiter *Test* sagt, was ihm fehlt. Das Sprechtoken der beiden Plugins müssen Sie nicht abschreiben: Es wird übernommen, in der Konfiguration gespeichert und nachgezogen; ein von Hand eingetragenes bleibt.
+* **Wann nicht:** Nachtruhe 22 bis 7 Uhr (einstellbar, wird nicht nachgeholt; Dringendes spricht trotzdem), dieselbe Ansage höchstens einmal in 30 Minuten (einstellbar) und solange Loxone das retained MQTT-Thema `haus/ansage/ruhe` auf 1 setzt (das gilt auch für Dringendes). Die Testansage im Reiter *Test* spricht immer.
+* **Der Minutenlauf wartet nicht auf Lautsprecher:** Gesprochen wird in einem eigenen Vorgang.
+* **Berichtigt:** Die Zeilen der Befehlsbrücke im Protokoll tragen das Wort „Befehlsbruecke“ nur noch einmal. Der Leser der Haus-Themen hat jetzt auch beim Lesen eines Pakets eine feste Frist.
+
+
 ## Neu in 0.9.49
 
 Bilder der Einbindung erneuert: Das Bild der Hauptseite „EVCC“ zeigt die neu angeordnete Seite. Sonst keine Änderung gegen 0.9.48.

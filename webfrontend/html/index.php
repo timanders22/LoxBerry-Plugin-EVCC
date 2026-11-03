@@ -196,7 +196,8 @@ function ev_ende($code, $text, $fertig = false)
  * ohne Einschraenkung, und eine fehlende Konfiguration wird aus der
  * Zweitschrift zurueckgeschrieben. Das ist der Hausstandard, und es steht
  * hier, damit der Satz oben nicht mehr verspricht, als er haelt. */
-$cfg = ev_config(false);
+/* bis 0.9.49 hiess dieses Feld $cfg: das LoxBerry-SDK ueberschreibt ein globales $cfg beim ersten Lesen von general.json (Ausfall MGiSmart 01.11.2026). */
+$ev_lauf_cfg = ev_config(false);
 
 /* ---------------- Selbstpruefung ----------------
  *
@@ -214,7 +215,7 @@ $ev_selftest = isset($_GET['selftest']) && is_string($_GET['selftest'])
                && (string) $_GET['selftest'] === '1';
 
 /* ---------------- Token ---------------- */
-$soll = (string) $cfg['aktionstoken'];
+$soll = (string) $ev_lauf_cfg['aktionstoken'];
 /* is_string() zuerst: ?token[]=x macht aus dem Parameter ein Feld, und
  * (string) auf ein Feld ist unter PHP 8 eine Warnung. */
 $ist  = (isset($_GET['token']) && is_string($_GET['token'])) ? (string) $_GET['token'] : '';
@@ -289,7 +290,7 @@ if ($ev_probe && in_array($aktion, $lesend, true)) {
  * Endpunkts liegt deshalb darunter - bei 2 x Takt (mindestens 10 s) fragt er
  * selbst nach. Bis 0.9.33 stand hier max(30, 2,5 x Takt): bei Takt 5 lieferte
  * er einen 29 s alten Stand als OK=1 (Pruefbericht code, Befund 6). */
-$ev_hoechstalter = max(10, 2 * (int) $cfg['takt']);
+$ev_hoechstalter = max(10, 2 * (int) $ev_lauf_cfg['takt']);
 
 /* ---------------- Lesende Aktionen ---------------- */
 

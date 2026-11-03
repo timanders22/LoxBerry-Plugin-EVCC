@@ -212,9 +212,10 @@ function ev_durchlauf($laut = false, $ansage = false, $nachreichen = false)
 }
 
 if ($modus === 'test') {
-    $cfg = ev_config();
-    echo "EVCC-Adresse: " . $cfg['url'] . "\n";
-    echo "Takt: " . $cfg['takt'] . " s\n\n";
+    /* bis 0.9.49 hiess dieses Feld $cfg: das LoxBerry-SDK ueberschreibt ein globales $cfg beim ersten Lesen von general.json (Ausfall MGiSmart 01.11.2026). */
+    $ev_lauf_cfg = ev_config();
+    echo "EVCC-Adresse: " . $ev_lauf_cfg['url'] . "\n";
+    echo "Takt: " . $ev_lauf_cfg['takt'] . " s\n\n";
     exit(ev_durchlauf(true) ? 0 : 1);
 }
 
@@ -286,8 +287,8 @@ if (is_file($ev_cronerr) && filesize($ev_cronerr) > 262144) {
     @file_put_contents($ev_cronerr, implode("\n", $ev_rest) . "\n");
 }
 
-$cfg = ev_config();
-$takt = max(5, min(60, (int) $cfg['takt']));
+$ev_lauf_cfg = ev_config();
+$takt = max(5, min(60, (int) $ev_lauf_cfg['takt']));
 $ende = time() + 58;   // zwei Sekunden Luft bis zum naechsten Cron-Lauf
 
 do {

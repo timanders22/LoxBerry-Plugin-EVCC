@@ -715,7 +715,7 @@ function ev_test_aktion($was)
         case 'ansage':
             /* Nr. 36 b: die Testansage. Ins Protokoll nur die Kurzform ohne Text und Token. */
             $ev_ak = ev_ansage_k();
-            $ev_ar = ansage_testansage(ev_tts(ev_config()), $ev_ak);
+            $ev_ar = ansage_testansage(ev_ansage_vor_ort(), $ev_ak);
             ev_log('Testansage: ' . ansage_kurz($ev_ar));
             if ($ev_ar['stand'] === 1) {
                 return array(1, ev_e(ev_t('DURCHSAGE.M_TEST_OK')));

@@ -436,7 +436,9 @@ function ev_vorgaben()
         'ansage_ausfall'     => 1,
         'ansage_startfehler' => 1,
         'ansage_fertig'      => 1,
-        'tts'               => ansage_vorgaben('aus'),
+        'tts'               => ansage_werk_block(),     // 0.9.50: nie gesetzt = ab Werk EIN; ein gespeicherter Block bleibt
+        'ansage_regeln'     => ansage_regeln_vorgaben(),
+        'ansage_token_herkunft' => array(),     // nie in einer Sicherung
     );
 }
 
@@ -2457,7 +2459,10 @@ function ev_mqtt_behalten_liste(array $themen)
     /* Genau $n Bytes lesen oder null - bei Zeitablauf und Verbindungsende. */
     $lies = function ($n) use ($s) {
         $d = '';
+        /* bis 0.9.49 ohne Frist: ein Broker, der ein Paket ankuendigt und nur tropfenweise liefert, hielt den Leser fest. Schweigt er ganz, greift schon stream_set_timeout(). */
+        $lies_bis = microtime(true) + 5.0;
         while (strlen($d) < $n) {
+            if (microtime(true) >= $lies_bis) { return null; }
             $t = @fread($s, $n - strlen($d));
             if ($t === false || $t === '') {
                 $meta = stream_get_meta_data($s);
@@ -3547,6 +3552,7 @@ function ev_eingabe_felder()
     );
     /* Nr. 36 b: Felder und Anlaesse der Ansage; die Sprechtoken als 'geheim' (reisen nie mit). */
     foreach (ev_ansage_x2() as $ev_n => $ev_a) { $ev_l['speichern'][$ev_n] = $ev_a; }
+    foreach (ansage_regeln_x2_felder() as $ev_n) { $ev_l['speichern'][$ev_n] = $ev_n === 'ansage_ruhe_ein' ? 'haken' : 'text'; }     // 0.9.50
     // Welle Mehrfach-Ziele (0.9.48): die Tabelle der weiteren Ziele, flach als name.N
     foreach (ev_ziele_x2_felder() as $ev_n) { $ev_l['speichern'][$ev_n] = 'text'; }
     return $ev_l;
@@ -4826,6 +4832,11 @@ function ev_wert_pruefen($schluessel, $wert)
         $ev_tg = '';
         return is_array($wert) && ansage_wert_pruefen($wert, $ev_tg, ev_ansage_modi()) !== null;
     }
+    if ($schluessel === 'ansage_regeln') {     // 0.9.50
+        $ev_tg = '';
+        return ansage_regeln_wert($wert, $ev_tg) !== null;
+    }
+    if ($schluessel === 'ansage_token_herkunft') { return is_array($wert); }
     /* NICHT getrimmt (C9, seit 0.9.34): ein Wert mit Leerzeichen am Rand wird
      * abgewiesen, nicht zurechtgebogen (Regeln/05, Ergaenzung 24.09.2026).
      * Bis 0.9.33 stand hier trim(), und eine Sicherung mit " http://... "
@@ -4901,6 +4912,9 @@ function ev_sicherung_wert_mangel($k, $w)
         $ev_tx = is_array($w) ? ansage_sicherung_x3($w, ev_ansage_modi()) : array('tts');
         return $ev_tx ? sprintf(ev_t('EINST.SICH_WERT_UNZULAESSIG'), ev_e(implode(', ', $ev_tx))) : '';
     }
+    if ($k === 'ansage_regeln' || $k === 'ansage_token_herkunft') {     // 0.9.50
+        return ev_wert_pruefen($k, $w) ? '' : sprintf(ev_t('EINST.SICH_WERT_UNZULAESSIG'), ev_e((string) $k));
+    }
     if (!ev_wert_taugt($w)) {
         return sprintf(ev_t('EINST.SICH_WERT_FORM'), ev_e((string) $k));
     }
@@ -4965,6 +4979,7 @@ function ev_sicherung_lesen($roh)
         if ((string) $k !== '' && substr((string) $k, 0, 1) === '_') {
             continue;
         }
+        if ($k === 'ansage_token_herkunft') { continue; }     // 0.9.50: nie aus einer Datei
         if (!in_array($k, $bekannt, true)) {
             $mangel[] = sprintf(ev_t('EINST.SICH_FREMD'), ev_e((string) $k));
             continue;
@@ -5043,6 +5058,11 @@ function ev_sicherung_lesen($roh)
     $ev_abehalten = array();
     $ev_jetzt_cfg = null;
     foreach (array_keys(ev_vorgaben()) as $fk) {
+        if ($fk === 'ansage_token_herkunft') {     // 0.9.50: der Vermerk bleibt der geltende
+            if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
+            $neu[$fk] = $ev_jetzt_cfg[$fk];
+            continue;
+        }
         if (!array_key_exists($fk, $daten)) {
             /* Energie-1 C1: eine Sicherung von vor der Schreiber-Wache kennt deren
              * Einstellungen nicht. Sie ist trotzdem vollstaendig; die geltenden Werte
@@ -5119,6 +5139,7 @@ function ev_sicherung_bauen()
     if (isset($ev_aus['tts']) && is_array($ev_aus['tts'])) {
         $ev_aus['tts'] = ansage_sicherung_bereinigen($ev_aus['tts']);
     }
+    unset($ev_aus['ansage_token_herkunft']);     // 0.9.50
     return $kopf + $ev_aus;
 }
 
@@ -5200,10 +5221,180 @@ function ev_ansage_anlaesse()
 /** Alle Schluessel der Ansage in der Konfiguration (fuer die Sicherung von vor 0.9.39). */
 function ev_ansage_schluessel()
 {
-    return array_merge(array('tts'), array_values(ev_ansage_anlaesse()));
+    return array_merge(array('tts', 'ansage_regeln'), array_values(ev_ansage_anlaesse()));
 }
 
-/** Der Block tts, vervollstaendigt (ab Werk 'aus'). */
+/* ---------------- Sprachansagen: Regeln aus dem Stamm (0.9.50, Welle S2, Stamm sprachausgabe.php 1.3.2) ----------------
+ *
+ * Nachtruhe, Sperre und Schalter "Ansagen aus" stehen im Stamm. Ab Werk EIN: ansage_werk_block() in den Vorgaben, also nur fuer einen
+ * nie gespeicherten Block; ein gespeicherter bleibt, auch 'aus'. Ein Minutenlauf und ein Dienst sprechen nie selbst: Sie legen den Anlass
+ * in <Daten>/ansage_warte.json, ein abgekoppelter Sender (php -r, eigene Sperre) spricht und wartet auf die Lautsprecher.
+ */
+
+/** So alt darf ein wartender Anlass werden (nach einem Update oder Hang wird nichts Aufgestautes angesagt). */
+if (!defined('EV_ANSAGE_HOECHSTALTER')) { define('EV_ANSAGE_HOECHSTALTER', 600); }
+
+/** Die Regeln: gespeichert und gueltig, sonst aus einer alten Einstellung dieser Linie, sonst die Vorgabe (mit Nachtruhe). */
+function ev_ansage_regeln($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $g = '';
+    if (isset($cfg['ansage_regeln'])) {
+        $r = ansage_regeln_wert($cfg['ansage_regeln'], $g);
+        return $r === null ? ansage_regeln_vorgaben() : $r;
+    }
+    $r = ansage_regeln_vorgaben();
+    $p = ansage_regeln_wert($r, $g);
+    return $p === null ? ansage_regeln_vorgaben() : $p;
+}
+
+/** Die Warteliste unter einer Dateisperre aendern: $fn(Liste) -> array(neue Liste, Ergebnis). */
+function ev_ansage_warte($fn)
+{
+    $d = ev_paths()['datadir'];
+    if (!is_dir($d)) { @mkdir($d, 0775, true); }
+    $f = $d . '/ansage_warte.json';
+    $h = @fopen($f, 'c+');
+    if ($h === false) { return null; }
+    if (!flock($h, LOCK_EX)) { fclose($h); return null; }
+    $alt = json_decode((string) stream_get_contents($h), true);
+    list($neu, $erg) = call_user_func($fn, is_array($alt) ? $alt : array());
+    rewind($h);
+    ftruncate($h, 0);
+    fwrite($h, (string) json_encode($neu));
+    fflush($h);
+    flock($h, LOCK_UN);
+    fclose($h);
+    @chmod($f, 0600);
+    return $erg;
+}
+
+/**
+ * Anlaesse hinlegen und den Sender starten; wartet auf nichts. $l: Eintraege fuer ansage_regel_sprechen() (schluessel, text, dringend,
+ * sperre_min, nur_nach). Die Schale schliesst vor dem exec jede Deskriptor-Nummer ueber 2, sonst erbte der Sender die Sperren des Rufers.
+ */
+function ev_ansage_legen(array $l, $jetzt = null)
+{
+    if (!$l) { return 'nichts'; }
+    $jetzt = $jetzt === null ? time() : (int) $jetzt;
+    ev_ansage_warte(function ($alt) use ($l, $jetzt) {
+        foreach ($l as $e) { $alt[] = $e + array('zeit' => $jetzt); }
+        return array(array_slice($alt, -50), null);
+    });
+    $php = (defined('PHP_BINARY') && PHP_BINARY !== '' && is_executable(PHP_BINARY) && stripos(basename(PHP_BINARY), 'php') === 0 && stripos(basename(PHP_BINARY), 'fpm') === false) ? PHP_BINARY : 'php';
+    $befehl = 'for f in /proc/$$/fd/*; do n=${f##*/}; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-"; done; '
+            . 'exec ' . escapeshellarg($php) . ' -r ' . escapeshellarg('chdir(dirname($argv[1])); $_SERVER["SCRIPT_FILENAME"] = $_SERVER["PHP_SELF"] = $argv[1]; require $argv[1]; ev_ansage_senden();') . ' -- ' . escapeshellarg(__FILE__);
+    $aus = array();
+    $rc = 1;
+    @exec('bash -c ' . escapeshellarg($befehl) . ' </dev/null >/dev/null 2>&1 &', $aus, $rc);
+    return $rc === 0 ? 'gestartet' : 'kein_start';
+}
+
+/** Das Sprechtoken aus Alexa-NG und Chromecast4lox uebernehmen (Stamm 1.3.1). Schreibt NUR bei einer Aenderung, nennt nie das Token. */
+function ev_ansage_token_pflegen($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    list($neu, $her2, $g) = ansage_token_abgleich(ev_tts($cfg), isset($cfg['ansage_token_herkunft']) ? $cfg['ansage_token_herkunft'] : array(), ev_ansage_k());
+    if (!$g) { return false; }
+    $cfg = ev_config(false);
+    $cfg['tts'] = $neu;
+    $cfg['ansage_token_herkunft'] = $her2;
+    if (!ev_config_write($cfg)) { return false; }
+    ev_log('Ansage: Sprechtoken uebernommen (' . implode(', ', $g) . ').');
+    return true;
+}
+
+/** Der Block fuer Testansage und Pruefzeile: uebernommene Token aufgeloest. Nur im Speicher. */
+function ev_ansage_vor_ort($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    return ansage_token_fuer_lauf(ev_tts($cfg), isset($cfg['ansage_token_herkunft']) ? $cfg['ansage_token_herkunft'] : array(), ev_ansage_k());
+}
+
+/** Der Block fuer die Pruefzeile: nur die eingerichteten Ziele; ist keines eingerichtet, sagt die Zeile "aus" statt eines Kreuzes. */
+function ev_ansage_pruefblock($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $t = ev_tts($cfg);
+    if ($t['mode'] === 'aus') { return $t; }
+    list($b) = ansage_ziele_bereit(ev_ansage_vor_ort($cfg), ev_ansage_k());
+    if ($b === null) { $t['mode'] = 'aus'; return $t; }
+    return $b;
+}
+
+/** Die Lage im Reiter Test: Ziele, Nachtruhe, Schalter. Nur im geoeffneten Reiter (der Schalter fragt den Broker). */
+function ev_ansage_lage_html($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $k = ev_ansage_k();
+    $o = array();
+    foreach (ansage_regel_lage(ev_tts($cfg), ev_ansage_regeln($cfg), $k, true) as $z) {
+        $o[] = '<div class="sm-hilfe">' . htmlspecialchars((string) $z[1], ENT_QUOTES, 'UTF-8') . '</div>';
+    }
+    return implode("\n", $o) . "\n";
+}
+
+/** Die Felder der Regeln fuer die Einmalmeldung (X-2). */
+function ev_ansage_regel_felder(array $anlaesse = array())
+{
+    return ansage_regeln_x2_felder($anlaesse);
+}
+
+/**
+ * Im Vorgang sprechen, wo der Rufer das Ergebnis braucht (Antwort an Loxone, Befehl): Regeln aus dem Stamm mit "dringend, ohne Sperre" - es zaehlt nur der Schalter.
+ * Schalter gesetzt: stand -1, Kennung SCHALTER. Nichts bereit oder Original-Audioserver: wie bisher ansage_sprechen(), damit die Antwort sagt, was fehlt.
+ */
+function ev_ansage_direkt($text, array $e = array(), $tts = null)
+{
+    $conf = ev_config(false);
+    $k = ev_ansage_k();
+    $t = $tts === null ? ev_tts($conf) : $tts;
+    $a = ansage_regel_sprechen(array($e + array('schluessel' => 'direkt', 'text' => (string) $text, 'dringend' => true, 'sperre_min' => 0)), $t, ev_ansage_regeln($conf), $k);
+    if ($a['r'] !== null) { return $a['r']; }
+    if ($a['regel'] === 'SCHALTER') {
+        return array('stand' => -1, 'kennung' => 'SCHALTER', 'art' => isset($t['mode']) ? (string) $t['mode'] : '-', 'http' => 0, 'zeile' => '', 'zeichen' => 0);
+    }
+    return ansage_sprechen((string) $text, $t, $k);
+}
+
+/**
+ * Der Sender: eigene Sperre, nimmt die Warteliste und spricht nach den Regeln. "aus" und "kein Ziel eingerichtet" hinterlassen keine Zeile;
+ * ein gescheitertes Ziel genau eine je Aenderung (ab Werk EIN darf kein Protokoll vollaufen). Text und Token stehen nie im Protokoll.
+ */
+function ev_ansage_senden($jetzt = null)
+{
+    $d = ev_paths()['datadir'];
+    if (!is_dir($d)) { @mkdir($d, 0775, true); }
+    $fh = @fopen($d . '/ansage_senden.lock', 'c');
+    if ($fh === false || !flock($fh, LOCK_EX | LOCK_NB)) { return 'laeuft'; }
+    $erg = 'nichts';
+    $l = ev_ansage_warte(function ($alt) { return array(array(), $alt); });
+    $jetzt = $jetzt === null ? time() : (int) $jetzt;
+    $frisch = array();
+    foreach (is_array($l) ? $l : array() as $e) {
+        if (is_array($e) && isset($e['zeit']) && $jetzt - (int) $e['zeit'] <= EV_ANSAGE_HOECHSTALTER) { $frisch[] = $e; }
+    }
+    if ($frisch) {
+        $conf = ev_config(false);
+        ev_ansage_token_pflegen($conf);
+        $conf = ev_config(false);
+        $a = ansage_regel_sprechen($frisch, ev_tts($conf), ev_ansage_regeln($conf), ev_ansage_k());
+        $erg = $a['regel'] !== '' ? $a['regel'] : 'gesprochen';
+        if ($a['r'] !== null) {
+            $merk = $d . '/ansage_lage.txt';
+            $lage = $a['r']['stand'] === 1 ? 'gesprochen' : ansage_kurz($a['r']);
+            if ($a['r']['stand'] === 1 || (string) @file_get_contents($merk) !== $lage) { ev_log('Ansage: ' . ansage_regel_kurz($a)); }
+            @file_put_contents($merk, $lage);
+        } elseif ($a['regel'] !== 'AUS' && $a['regel'] !== 'KEIN_ZIEL') {
+            ev_log('Ansage entfaellt: ' . ansage_regel_kurz($a));
+        }
+    }
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    return $erg;
+}
+
+/** Der Block tts, vervollstaendigt (ein nie gespeicherter kommt aus den Vorgaben: ab Werk EIN). */
 function ev_tts($cfg = null)
 {
     $cfg = is_array($cfg) ? $cfg : ev_config();
@@ -5223,6 +5414,7 @@ function ev_ansage_k()
 {
     $p = ev_paths();
     return array(
+        'werk' => ansage_werk_modus(),
         'port'   => $p['home'] !== '' ? ansage_webport($p['home'] . '/config/system/general.json') : 80,
         'kopf'   => array('User-Agent: LoxBerry EVCC'),
         'ordner' => @is_dir($p['datadir']) ? $p['datadir'] : '',
@@ -5329,35 +5521,20 @@ function ev_ansage_takt(array $werte, $jetzt = null)
     }
     $m['lp'] = $lp_neu;
 
+    /* 0.9.50: Sperre, Nachtruhe und Schalter stehen im Stamm, gesprochen wird in einem eigenen Vorgang. Nichts hiervon ist dringend. */
     $anl = ev_ansage_anlaesse();
-    $sperre = (isset($m['sperre']) && is_array($m['sperre'])) ? $m['sperre'] : array();
-    $tts = null;
-    $k = null;
+    $legen = array();
     foreach ($faelle as $f) {
-        list($anlass, $schl, $satz, $wer) = $f;
+        list($anlass, $schl, $satz) = $f;
         if (empty($cfg[$anl[$anlass]])) { continue; }    // abgewaehlt
-        $zuletzt = isset($sperre[$schl]) ? (int) $sperre[$schl] : 0;
-        if ($zuletzt > 0 && ($jetzt - $zuletzt) < EV_ANSAGE_SPERRE_S && ($jetzt - $zuletzt) >= -300) {
-            ev_log('Ansage: ' . $wer . ' innerhalb von 30 min nach der letzten Ansage dieses Anlasses - '
-                   . 'nicht angesagt (Wiederholsperre).');
-            continue;
-        }
-        $sperre[$schl] = $jetzt;
-        if ($tts === null) { $tts = ev_tts($cfg); $k = ev_ansage_k(); }
-        $r = ansage_sprechen($satz, $tts, $k);
+        $legen[] = array('schluessel' => $schl, 'text' => $satz);
         $n++;
-        if ($r['stand'] === 1) {
-            ev_log('Ansage: ' . $wer . ' angesagt (' . ansage_kurz($r) . ').');
-        } else {
-            $fehl++;
-            ev_log('Ansage: ' . $wer . ' nicht angesagt: ' . ansage_kennung_text($r['kennung'], $k)
-                   . '. Zeile, MQTT und LoxBerry-Meldung sind davon nicht betroffen; es wird nicht wiederholt.');
-        }
     }
-    foreach ($sperre as $kk => $t) {
-        if (!is_string($kk) || ($jetzt - (int) $t) > 86400 || ($jetzt - (int) $t) < -86400) { unset($sperre[$kk]); }
+    if ($legen) {
+        ev_ansage_token_pflegen($cfg);
+        ev_ansage_legen($legen, $jetzt);
     }
-    $m['sperre'] = $sperre;
+    unset($m['sperre']);
     $neu_js = json_encode($m);
     if ($neu_js !== false && $neu_js !== $alt_js && !ev_datei_schreiben($datei, $neu_js, 0600)) {
         ev_log_wenn_neu('ansage_merker', 'WARNUNG: Der Merker fuer die Ansage liess sich nicht schreiben (' . $datei . ').');
@@ -5370,7 +5547,7 @@ function ev_ansage_takt(array $werte, $jetzt = null)
 /** Die Zeile im Reiter Test: 1 Haken, 0 Kreuz, -1 Hinweis (aus). Der Text ist maskiert (Modul). */
 function ev_pruefe_ansage($cfg = null)
 {
-    list($st, $text) = ansage_pruefzeile(ev_tts($cfg), true, ev_ansage_k());
+    list($st, $text) = ansage_pruefzeile(ev_ansage_pruefblock(), true, ev_ansage_k());
     return array($st === 1 ? 1 : ($st === -2 ? -1 : 0), $text);
 }
 
