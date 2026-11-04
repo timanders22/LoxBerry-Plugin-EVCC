@@ -4221,7 +4221,7 @@ function ev_bremse_nachreichen_kern(array &$bm, array &$pm, $jetzt, $senden)
         } else {
             $aus[] = array('fehler', $schl, $aktion, $klar, $lp_anzeige,
                 (is_array($a) ? 'CODE=' . (int) (isset($a['code']) ? $a['code'] : 0) . ', '
-                    . (isset($a['fehler']) ? (string) $a['fehler'] : '') : 'keine Antwort'));
+                    . (isset($a['fehler']) ? (string) $a['fehler'] : '') : ev_t('TEST.E_KEINE_ANTWORT')));
         }
     }
     return $aus;
@@ -5308,7 +5308,7 @@ function ev_ansage_token_pflegen($cfg = null)
 function ev_ansage_vor_ort($cfg = null)
 {
     if ($cfg === null) { $cfg = ev_config(false); }
-    return ansage_token_fuer_lauf(ev_tts($cfg), isset($cfg['ansage_token_herkunft']) ? $cfg['ansage_token_herkunft'] : array(), ev_ansage_k());
+    return ansage_tafel_einreihen(ansage_token_fuer_lauf(ev_tts($cfg), isset($cfg['ansage_token_herkunft']) ? $cfg['ansage_token_herkunft'] : array(), ev_ansage_k()), ev_ansage_regeln($cfg), ev_ansage_k(), true);     // Stamm 1.4.0: die Tafel, wenn sie bereitsteht
 }
 
 /** Der Block fuer die Pruefzeile: nur die eingerichteten Ziele; ist keines eingerichtet, sagt die Zeile "aus" statt eines Kreuzes. */
