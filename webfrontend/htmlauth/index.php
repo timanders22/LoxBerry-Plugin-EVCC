@@ -102,6 +102,7 @@ if ($ev_wache !== '') {
    Vor jeder Ausgabe, sonst stehen HTML-Reste in der XML-Datei. */
 if ($ev_post && isset($_POST['vorlage'])) {
     list($ev_vname, $ev_vinhalt) = ($_POST['vorlage'] === 'aus') ? ev_vorlage_aus() : ev_vorlage_ein();
+    while (ob_get_level() > 0) { @ob_end_clean(); }
     header('Content-Type: application/x-download');
     header('Content-Disposition: attachment; filename="' . $ev_vname . '"');
     echo $ev_vinhalt;
@@ -114,6 +115,7 @@ if ($ev_post && isset($_POST['vorlage'])) {
 if ($ev_post && isset($_POST['vorlage_bb'])) {
     $ev_bv = ev_befehle_vorlage();
     if (is_array($ev_bv)) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/x-download');
         header('Content-Disposition: attachment; filename="' . $ev_bv[0] . '"');
         echo $ev_bv[1];
@@ -414,6 +416,7 @@ if ($ev_post && isset($_POST['ev_sichern'])) {
     $ev_js = json_encode($ev_sich,
         JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     if ($ev_js !== false) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Disposition: attachment; filename="evcc_einstellungen_'
                . date('Ymd_His') . '.json"');
