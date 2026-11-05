@@ -9,6 +9,12 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.53
+
+- **Sprechtoken:** Ein von Hand eingetragenes Alexa- oder Google-Token wird nicht mehr vom Token des Nachbar-Plugins überschrieben.
+- **Formular:** Tafel- und HomePod-Felder gehören jetzt zu den Feldern, die eine Beanstandung im Formular mitführt und markiert. Ein beanstandeter Tafel- oder HomePod-Name bleibt zur Korrektur im Feld stehen.
+- **Dauerfelder:** Restzeit, PV-Wartezeit, Phasen-Wartezeit und Ladedauer standen bei aktuellem EVCC immer auf 0 Minuten und zeigen jetzt den echten Wert; alte EVCC-Fassungen mit Nanosekunden bleiben richtig.
+
 ## Neu in 0.9.52
 
 - Vor einem Download wird jeder offene Ausgabepuffer geleert: PHP-Warnungen oder Reste landen nicht mehr in der heruntergeladenen Datei.
@@ -1042,7 +1048,7 @@ sudo -u loxberry php "$LBHOMEDIR/bin/plugins/<ordner>/ev_abruf.php"; echo "Rueck
   eingetragen und EVCC per `apt` installiert — kein Docker, keine Handarbeit.
   Ist EVCC schon vorhanden, bleibt es unangetastet.
 - **Holt die Werte** im einstellbaren Takt (5 bis 60 s) über die REST-Schnittstelle.
-- **Rechnet um.** Watt zu Kilowatt, Nanosekunden zu Minuten, Anteile zu Prozent.
+- **Rechnet um.** Watt zu Kilowatt, Dauern zu Minuten (Sekunden, bei alten EVCC-Fassungen Nanosekunden), Anteile zu Prozent.
   Die Vorzeichen passen bereits: EVCC zählt Netzbezug und Speicherentladung
   positiv, der Energiemanager auch.
 - **Liefert nach Loxone** auf zwei Wegen: über MQTT (der Regelweg) und über

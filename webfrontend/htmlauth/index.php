@@ -292,6 +292,8 @@ if ($ev_post && isset($_POST['speichern'])) {
     $ev_tneu = ansage_formular_lesen($_POST, ev_tts($ev_cfg), $ev_tmangel, $ev_tbean,
                                      array('modi' => ev_ansage_modi(), 'ziele' => ev_mit_zielen(), 'token_vor_ort' => true, 'aus_gewinnt' => true), ev_ansage_k(), $ev_thinw);
     list($ev_cfg['ansage_regeln']) = ansage_regeln_formular($_POST, ev_ansage_regeln($ev_cfg), array(), $ev_tmangel, $ev_tbean, ev_ansage_k());     // S2: Wann gesprochen wird (Stamm)
+    // 0.9.53: ein eingetipptes oder geloeschtes Sprechtoken ist nicht mehr vom Nachbarn; bis 0.9.52 ueberschrieb es der naechste Abgleich.
+    $ev_cfg['ansage_token_herkunft'] = ansage_token_herkunft_formular($_POST, isset($ev_cfg['ansage_token_herkunft']) ? $ev_cfg['ansage_token_herkunft'] : array());
     foreach ($ev_tmangel as $ev_tm) { $ev_fehler[] = ev_e($ev_tm['text']); }
     foreach ($ev_tbean as $ev_tb) { $ev_bean[] = ev_ziele_x2_name($ev_tb); }     // 0.9.48: name[N] -> name.N
     if (!$ev_tmangel) { $ev_cfg['tts'] = $ev_tneu; }

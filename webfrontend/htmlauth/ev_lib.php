@@ -1120,8 +1120,14 @@ function ev_umrechnen($typ, $wert)
             return round(((float) $wert) / 1000, 3);
         case 'prozent1':  // Anteil 0..1 -> Prozent
             return round(((float) $wert) * 100, 1);
-        case 'minuten':   // Nanosekunden -> Minuten. EVCC gibt Dauern in ns aus.
-            return (int) round(((float) $wert) / 1000000000 / 60);
+        case 'minuten':
+            // 0.9.53 (EV-1): EVCC liefert Dauern in Sekunden (util/encode/encode.go: WithDuration, int(val.Seconds());
+            // server/http_site_handler.go stateHandler, nachgelesen in Tag 0.130.0 und master). Tag 0.123.0 hat diesen
+            // Encoder noch nicht und gab die Go-Dauer als Nanosekunden aus. Bis 0.9.52 wurde immer durch 1e9 geteilt: jede
+            // Restzeit stand auf 0 Minuten. Ab 1e7 (115 Tage als Sekunden, 10 ms als ns) gilt der Wert als Altform.
+            $z = (float) $wert;
+            if (abs($z) >= 10000000) { $z = $z / 1000000000; }
+            return (int) round($z / 60);
         case 'zahl':
             $z = (float) $wert;
             return (float) $z == (int) $z ? (int) $z : round($z, 3);
@@ -3552,7 +3558,8 @@ function ev_eingabe_felder()
     );
     /* Nr. 36 b: Felder und Anlaesse der Ansage; die Sprechtoken als 'geheim' (reisen nie mit). */
     foreach (ev_ansage_x2() as $ev_n => $ev_a) { $ev_l['speichern'][$ev_n] = $ev_a; }
-    foreach (ansage_regeln_x2_felder() as $ev_n) { $ev_l['speichern'][$ev_n] = $ev_n === 'ansage_ruhe_ein' ? 'haken' : 'text'; }     // 0.9.50
+    // 0.9.50; 0.9.53: Tafel und HomePod dazu: ansage_regeln_formular() beanstandet sie, ohne Eintrag hier ging die Beanstandung samt Eingaben verloren.
+    foreach (array_merge(ansage_regeln_x2_felder(), array('ansage_tafel_ein', 'ansage_tafel_namen', 'ansage_homepod_ein', 'ansage_homepod_geraet')) as $ev_n) { $ev_l['speichern'][$ev_n] = in_array($ev_n, array('ansage_ruhe_ein', 'ansage_tafel_ein', 'ansage_homepod_ein'), true) ? 'haken' : 'text'; }
     // Welle Mehrfach-Ziele (0.9.48): die Tabelle der weiteren Ziele, flach als name.N
     foreach (ev_ziele_x2_felder() as $ev_n) { $ev_l['speichern'][$ev_n] = 'text'; }
     return $ev_l;
