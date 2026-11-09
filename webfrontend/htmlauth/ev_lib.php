@@ -3554,7 +3554,10 @@ function ev_eingabe_felder()
                              // Energie-1 C1, Schreiber-Wache
                              'wache_ein' => 'haken', 'wache_fenster_min' => 'text', 'wache_lb_melden' => 'haken',
                              'wache_sperren_ein' => 'haken', 'wache_erlaubt' => 'text'),
-        'save_mqtt' => array('mqtt_ein' => 'haken', 'mqtt_topic' => 'text', 'mqtt_vollsend_min' => 'text'),
+        // 0.9.55 (Bestandspruefung 09.11.2026): befehle_mqtt_ein steht im selben Formular (index.php, Handler save_mqtt)
+        // und fehlte hier - nach einer Beanstandung zeigte der Haken den gespeicherten statt des abgeschickten Stands.
+        'save_mqtt' => array('mqtt_ein' => 'haken', 'befehle_mqtt_ein' => 'haken', 'mqtt_topic' => 'text',
+                             'mqtt_vollsend_min' => 'text'),
     );
     /* Nr. 36 b: Felder und Anlaesse der Ansage; die Sprechtoken als 'geheim' (reisen nie mit). */
     foreach (ev_ansage_x2() as $ev_n => $ev_a) { $ev_l['speichern'][$ev_n] = $ev_a; }

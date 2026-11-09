@@ -9,6 +9,10 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.55
+
+- Reiter MQTT: Wird das Formular beanstandet, steht der Haken „Befehle über MQTT annehmen“ danach so da, wie er abgeschickt wurde. Bisher kam der gespeicherte Stand zurück. Gespeichert wurde in beiden Fällen nichts.
+
 ## Neu in 0.9.54
 
 - Gemeinsames Sprachmodul 1.4.2: Wird eine Ansage bewusst nicht gesprochen (gerade eben schon gesagt, gesperrt oder Ruhezeit), steht das im Protokoll jetzt so – und nicht mehr als Fehler.
