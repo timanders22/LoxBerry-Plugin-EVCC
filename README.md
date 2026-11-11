@@ -9,6 +9,12 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.57
+
+- **Konfiguration wird nach einem Update vervollständigt:** Fehlen in `evcc.json` Einstellungen, die eine neuere Fassung mitbringt, trägt der Minutentakt (`bin/ev_abruf.php cron`) sie jetzt einmal in die Datei ein, hinter seiner Sperre und vor dem ersten Lesen der Konfiguration. Geschrieben wird über denselben Weg wie beim Speichern im Formular (`ev_config_write()`, Rechte 0600, Zweitschrift daneben); das Protokoll `evcc.log` nennt die ergänzten Namen in einer Zeile, keine Werte. Bisher ergänzte das Plugin fehlende Einstellungen nur beim Lesen; in die Datei kamen sie erst beim nächsten Speichern, beim ersten Aktionstoken oder beim Heilen aus der Zweitschrift.
+- Geschrieben werden die Werte aus der Datei, wie sie dort stehen, plus die fehlenden Vorgaben: ein Takt außerhalb von 5 bis 60 Sekunden oder eine Adresse mit Schrägstrich am Ende bleiben in der Datei so stehen, wie sie eingetragen sind (gelesen werden sie weiter begrenzt bzw. bereinigt), und Schlüssel, die das Plugin nicht kennt, bleiben stehen. Was das Plugin aus der Konfiguration liest, ändert sich dadurch nicht. Nicht angefasst werden eine fehlende oder unlesbare `evcc.json`, eine ohne Aktionstoken oder mit bewusst geleertem Aktionstoken und jede Datei, solange die Marke „Aktualisierung läuft“ liegt.
+- Gemessen im Prüfstand auf dem Arbeitsrechner unter PHP 7.4 und 8.4; die Aufrufstelle im Minutentakt ist nur am Quelltext geprüft (ein echter Lauf schreibt in `/tmp`), am Gerät ist es noch nicht gemessen.
+
 ## Neu in 0.9.56
 
 - Gemeinsames Sprachmodul 1.4.3: Als LoxBerry-Wurzel aus `LBHOMEDIR` gilt für die Sprachausgabe nur noch ein Ordner mit `config/plugins`, `data/plugins` und `config/system/general.json`; bis 1.4.2 genügte `config/system`, und ein Prüfstand oder Rest mit diesem Ordner wurde wie ein LoxBerry gelesen. Auf einem LoxBerry ändert sich nichts.

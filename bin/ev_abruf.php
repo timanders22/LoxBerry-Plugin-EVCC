@@ -264,6 +264,11 @@ if (!flock($fh, LOCK_EX | LOCK_NB)) {
     exit(0);
 }
 
+/* 0.9.57 (Regeln/05): fehlende Vorgaben einmal in evcc.json schreiben - hinter der Sperre und vor dem ersten
+ * Lesen der Konfiguration in diesem Lauf. Waehrend einer Aktualisierung (Marke) schreibt die Funktion nichts;
+ * cron.01min startet dann ohnehin nicht. */
+ev_config_vervollstaendigen();
+
 /* Gruppe 4 / MQTT (0.9.45, Entwurf ev 3.3): der Waechter der Befehlsbruecke - nach der Sperre, einmal je
  * Cron-Lauf, in ev_bruecke_waechter() gekapselt (try/catch: ein Fehler haelt den Abruf nicht an). Er startet die
  * Bruecke nur mit dem Haken "Befehle ueber MQTT annehmen", haelt sie sonst an und sendet <praefix>/status/befehle

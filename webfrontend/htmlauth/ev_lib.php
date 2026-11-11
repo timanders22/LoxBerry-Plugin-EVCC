@@ -670,6 +670,86 @@ function ev_config_write($cfg)
     return true;
 }
 
+/** Leere Objekte des Rohtextes ($o, json_decode ohne true) im Feld $a wieder als Objekt fuehren (seit 0.9.57),
+ *  damit json_encode() sie als {} und nicht als [] schreibt. Nur fuer ev_config_vervollstaendigen(). */
+function ev_json_leere_objekte($a, $o)
+{
+    if (!is_array($a)) { return $a; }
+    if (is_object($o)) {
+        if (!get_object_vars($o) && $a === array()) { return new stdClass(); }
+        foreach ($a as $k => $v) {
+            $ks = (string) $k;
+            if (is_array($v) && property_exists($o, $ks)) { $a[$k] = ev_json_leere_objekte($v, $o->$ks); }
+        }
+    } elseif (is_array($o)) {
+        foreach ($a as $k => $v) {
+            if (is_array($v) && array_key_exists($k, $o)) { $a[$k] = ev_json_leere_objekte($v, $o[$k]); }
+        }
+    }
+    return $a;
+}
+
+/**
+ * Fehlende Vorgaben EINMAL in evcc.json schreiben (seit 0.9.57, Regeln/05).
+ *
+ * Bis 0.9.56 ergaenzte ev_config() fehlende Schluessel bei jedem Lesen nur im Speicher; geschrieben wurde die
+ * Datei nur beim Speichern im Formular, beim ersten Token und beim Heilen aus der Zweitschrift. Aufgerufen vom
+ * Minutentakt (bin/ev_abruf.php cron) hinter dessen Sperre und vor dem ersten Lesen der Konfiguration; weil nur
+ * bei FEHLENDEN Schluesseln geschrieben wird, bleibt es bei einem Schreibvorgang.
+ *
+ * - Nur mit LoxBerry-Wurzel, nicht waehrend einer Aktualisierung (Marke, ev_upgrade_laeuft()), und nur, wenn die
+ *   Datei ein Objekt ist und ein nicht leeres Aktionstoken traegt (das Merkwort). Eine fehlende, kaputte, leere
+ *   oder tokenlose Datei ist Sache von ev_config() (Token, Selbstheilung); ein bewusst geleertes Token bleibt
+ *   auch hier unangetastet - die Datei wird dann nicht vervollstaendigt.
+ * - Geschrieben werden die WERTE AUS DER DATEI plus die fehlenden Vorgaben, nicht die von ev_config()
+ *   aufbereiteten (Takt begrenzt, Adresse ohne Schraegstrich, Haken auf 0/1); fremde Schluessel bleiben stehen.
+ *   ev_config() kennt keine Lese-Regel fuer Bestandsdateien (ein fehlender Schluessel liest die Vorgabe),
+ *   deshalb ist die Vorgabe hier auch der geschriebene Wert. Nur die Schluessel aus ev_vorgaben() - genau die,
+ *   die das Speichern im Formular ohnehin schreibt.
+ * - Geschrieben wird ueber ev_config_write() (0600, Zweitschrift wie beim Speichern).
+ * - Genau eine Protokollzeile mit den Namen, nie mit Werten.
+ *
+ * Rueckgabe: array('stand' => ruht|ohne_datei|ohne_merkwort|vollstaendig|ergaenzt|fehler, 'schluessel' => array())
+ */
+function ev_config_vervollstaendigen()
+{
+    $p = ev_paths();
+    if ($p['home'] === '' || ev_upgrade_laeuft()) {
+        return array('stand' => 'ruht', 'schluessel' => array());
+    }
+    clearstatcache(true, $p['config']);
+    if (!is_file($p['config'])) {
+        return array('stand' => 'ohne_datei', 'schluessel' => array());
+    }
+    $roh = @file_get_contents($p['config']);
+    $datei = is_string($roh) ? json_decode($roh, true) : null;
+    if (!is_array($datei) || !isset($datei['aktionstoken']) || !is_string($datei['aktionstoken'])
+        || $datei['aktionstoken'] === '') {
+        return array('stand' => 'ohne_merkwort', 'schluessel' => array());
+    }
+    $fehlend = array();
+    foreach (ev_vorgaben() as $k => $w) {
+        if (!array_key_exists($k, $datei)) {
+            $datei[$k] = $w;
+            $fehlend[] = $k;
+        }
+    }
+    if (!$fehlend) {
+        return array('stand' => 'vollstaendig', 'schluessel' => array());
+    }
+    // Ein leeres Objekt der Datei ({}) bliebe nach json_decode(..., true) ein leeres Feld und kaeme als []
+    // zurueck - der Rohwert wird erhalten.
+    $datei = ev_json_leere_objekte($datei, json_decode($roh));
+    if (!ev_config_write($datei)) {
+        ev_log('Konfiguration NICHT vervollstaendigt: evcc.json liess sich nicht schreiben ('
+            . count($fehlend) . ' fehlende Schluessel).');
+        return array('stand' => 'fehler', 'schluessel' => $fehlend);
+    }
+    ev_log('Konfiguration vervollstaendigt - ' . count($fehlend)
+        . ' fehlende Vorgaben in evcc.json geschrieben: ' . implode(', ', $fehlend));
+    return array('stand' => 'ergaenzt', 'schluessel' => $fehlend);
+}
+
 /** Zufaelliges Token. random_bytes, nicht rand() - das Token schuetzt einen
  *  Endpunkt, der ohne Anmeldung erreichbar ist. */
 /**
