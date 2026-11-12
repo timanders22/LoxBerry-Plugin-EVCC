@@ -9,6 +9,14 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.58
+
+Pflegefassung aus der Nachtprüfung vom 12.11.2026. Werte, MQTT-Themen und Loxone-Namen bleiben, wie sie sind.
+
+- **Fehler behoben: Sehr große Zahlen wurden zu 0.** Ein Befehl mit einem Wert wie `1e40` oder `18446744073709551616` wurde unter PHP 7.4 und 8.x zu 0 umgewandelt und angenommen – beim Lademodus heißt 0 „off“, `?aktion=modus&wert=1e40` beendete also die Ladung mit `OK=1`. Solche Werte werden jetzt abgewiesen wie jeder andere unzulässige Wert.
+- **Fehler behoben: Ein Aktionstoken, das in der Datei als Liste steht, galt als „Array“.** Mit einem von Hand verdorbenen `evcc.json` (`"aktionstoken": ["x"]`) nahm der Endpunkt `?token=Array` an. Ein solches Token gilt jetzt als nicht eingerichtet; der Endpunkt weist ab.
+- **Reiter Test:** Der apt-Kandidat wurde als neuer gemeldet, wenn er gleich der laufenden Fassung war, weil EVCC die eigene Fassung mit dem Commit in Klammern nennt (`0.315.0 (abc123)`). Verglichen wird jetzt nur die Fassungsnummer.
+
 ## Neu in 0.9.57
 
 - **Konfiguration wird nach einem Update vervollständigt:** Fehlen in `evcc.json` Einstellungen, die eine neuere Fassung mitbringt, trägt der Minutentakt (`bin/ev_abruf.php cron`) sie jetzt einmal in die Datei ein, hinter seiner Sperre und vor dem ersten Lesen der Konfiguration. Geschrieben wird über denselben Weg wie beim Speichern im Formular (`ev_config_write()`, Rechte 0600, Zweitschrift daneben); das Protokoll `evcc.log` nennt die ergänzten Namen in einer Zeile, keine Werte. Bisher ergänzte das Plugin fehlende Einstellungen nur beim Lesen; in die Datei kamen sie erst beim nächsten Speichern, beim ersten Aktionstoken oder beim Heilen aus der Zweitschrift.

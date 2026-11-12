@@ -2163,6 +2163,10 @@ function ev_fassung_norm($v)
 {
     $v = trim((string) $v);
     $v = preg_replace('/^[^0-9]*/', '', $v);
+    /* SEIT 0.9.58: alles ab dem ersten Leerraum faellt weg. EVCC nennt die eigene Fassung mit dem Commit in
+     * Klammern ("0.315.0 (abc123)"); der Reiter Test verglich den apt-Kandidaten "0.315.0" damit und meldete ihn
+     * als neuer (gemessen mit version_compare). */
+    $v = preg_replace('/\s.*$/s', '', $v);
     $v = str_replace('~', '-', $v);
     $v = preg_replace('/\+.*$/', '', $v);
     return (string) $v;
@@ -4080,7 +4084,11 @@ function ev_fahrzeug_befehle($namen)
 function ev_befehl_pruefen($b, $wert)
 {
     $zahl = str_replace(',', '.', (string) $wert);
-    $ganz = is_numeric($zahl) ? (int) round((float) $zahl) : null;
+    /* BERICHTIGT in 0.9.58: nur Zahlen, die als Ganzzahl darstellbar sind. Bis 0.9.57 wurden 1e40, -1e40 und
+     * 18446744073709551616 unter PHP 7.4 und 8.x zu 0 (gemessen) - beim Lademodus heisst 0 "off", und
+     * ?aktion=modus&wert=1e40 beendete die Ladung mit OK=1. Jetzt ist $ganz dann null und der Wert wird abgewiesen.
+     * Die Grenze 1e9 liegt weit ueber jedem erlaubten Bereich dieser Datei. */
+    $ganz = (is_numeric($zahl) && abs((float) $zahl) < 1e9) ? (int) round((float) $zahl) : null;
     $art = $b['pruef'];
 
     if ($art === 'ohne') { return array(1, '-'); }

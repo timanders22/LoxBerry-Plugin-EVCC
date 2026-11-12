@@ -215,7 +215,11 @@ $ev_selftest = isset($_GET['selftest']) && is_string($_GET['selftest'])
                && (string) $_GET['selftest'] === '1';
 
 /* ---------------- Token ---------------- */
-$soll = (string) $ev_lauf_cfg['aktionstoken'];
+/* BERICHTIGT in 0.9.58: is_string() auch hier. Bis 0.9.57 stand (string) davor, und ein Feld in der Datei
+ * ("aktionstoken": ["x"]) wurde zum Token "Array", das ?token=Array annahm - der Schutz fiel offen aus. Jetzt gilt
+ * ein solches Token als nicht eingerichtet. */
+$soll = (isset($ev_lauf_cfg['aktionstoken']) && is_string($ev_lauf_cfg['aktionstoken']))
+        ? $ev_lauf_cfg['aktionstoken'] : '';
 /* is_string() zuerst: ?token[]=x macht aus dem Parameter ein Feld, und
  * (string) auf ein Feld ist unter PHP 8 eine Warnung. */
 $ist  = (isset($_GET['token']) && is_string($_GET['token'])) ? (string) $_GET['token'] : '';
