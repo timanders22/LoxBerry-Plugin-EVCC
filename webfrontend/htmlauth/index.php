@@ -408,16 +408,11 @@ $ev_plugin = $ev_p['plugin'];
  * kaeme trotzdem nicht an die Anlage; die Datei waere wertlos. Damit
  * traegt sie ein Geheimnis, und der Hinweis am Knopf sagt das. */
 if ($ev_post && isset($_POST['ev_sichern'])) {
-    /* Ein lesbarer Kopf voran - Hausstandard. Er sagt dem, der die Datei ein
-     * Jahr spaeter in der Hand hat, woher sie stammt und was in ihr steckt.
-     * Die Schluessel beginnen mit einem Unterstrich; ev_sicherung_lesen()
-     * uebergeht genau diese und beanstandet sie nicht (bis 0.9.26 haette es
-     * die eigene Datei damit abgelehnt). */
-    /* Nur die bekannten Schluessel (O3, seit 0.9.34): ev_sicherung_bauen(). */
-    $ev_sich = ev_sicherung_bauen();
-    $ev_js = json_encode($ev_sich,
-        JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    if ($ev_js !== false) {
+    /* 0.9.59: Kopf (_hinweis, _plugin, _fassung, _stand) und Inhalt baut das gemeinsame
+     * Sicherungsmodul (ev_sicherung_daten() -> sicherung_bauen()); nur die bekannten
+     * Schluessel (O3, seit 0.9.34), nie ein Sprechtoken. */
+    $ev_js = sicherung_json(ev_sicherung_daten());
+    if ($ev_js !== '') {
         while (ob_get_level() > 0) { @ob_end_clean(); }
         header('Content-Type: application/json; charset=utf-8');
         header('Content-Disposition: attachment; filename="evcc_einstellungen_'
@@ -430,40 +425,36 @@ if ($ev_post && isset($_POST['ev_sichern'])) {
 
 /* ---------------- Einstellungen zurueckspielen ----------------
  *
- * is_uploaded_file() ZUERST: ohne diese Pruefung liesse sich jede Datei des
- * Servers unterschieben. Dann die Groessengrenze - eine Sicherung dieses
- * Plugins ist wenige Kilobyte gross; alles darueber wird gar nicht gelesen. */
+ * 0.9.59: den Eingang prueft das gemeinsame Sicherungsmodul (sicherung_eingang(), Modul 1.1.0,
+ * Entscheidung des Hausherrn 12.11.2026) - in jeder Linie gleich: zuerst der Haken zurueck_ok (ohne
+ * ihn wird nichts gelesen und nichts geaendert), dann is_uploaded_file() (sonst liesse sich jede
+ * Datei des Servers unterschieben) und die Groessengrenze des Moduls (256 KB; bis 0.9.58 waren es
+ * hier 64 KB). Erst danach wird die Datei gelesen. */
 if ($ev_post && isset($_POST['ev_zurueck'])) {
-    if (!isset($_FILES['ev_sicherung']) || !is_array($_FILES['ev_sicherung'])
-        || !isset($_FILES['ev_sicherung']['tmp_name'])
-        || !@is_uploaded_file($_FILES['ev_sicherung']['tmp_name'])) {
-        $ev_fehler[] = ev_t('EINST.SICH_KEINE_DATEI');
-    } elseif ((int) $_FILES['ev_sicherung']['size'] > 65536) {
-        $ev_fehler[] = ev_t('EINST.SICH_ZU_GROSS');
+    list($ev_roh, $ev_ab) = sicherung_eingang(ev_sicherung_beschreibung(), $_POST, $_FILES, 'ev_sicherung');
+    if ($ev_ab !== null) {
+        $ev_m = sicherung_meldungen(ev_sicherung_beschreibung(), $ev_ab);
+        foreach ($ev_m['fehler'] as $ev_x) { $ev_fehler[] = $ev_x; }
     } else {
-        list($ev_neu, $ev_mangel, $ev_n, $ev_hinw) = ev_sicherung_lesen(
-            (string) @file_get_contents($_FILES['ev_sicherung']['tmp_name']));
-        if ($ev_neu === null) {
-            /* ALLE Beanstandungen, nicht nur die erste - und geaendert wird
-             * nichts. */
-            $ev_fehler[] = ev_t('EINST.SICH_ABGELEHNT') . ' '
-                            . implode(' ', $ev_mangel);
-        } elseif (($ev_zalt = ev_config()) && ev_config_write($ev_neu)) {
-            $ev_meldungen[] = sprintf(ev_t('EINST.SICH_UEBERNOMMEN'), $ev_n);
-            ev_abo_datei($ev_neu['mqtt_topic'], true);   // Gruppe 4 / MQTT (0.9.45, E6)
-            $ev_bruecke_melden = true;
-            // Was dabei nicht uebernommen, sondern behalten wurde (O3).
-            foreach ($ev_hinw as $ev_h) { $ev_meldungen[] = $ev_h; }
-            /* Eine Sicherung kann das Praefix, den MQTT-Schalter und die Zahl
-             * der Ladepunkte aendern - dann dasselbe Abraeumen wie beim
-             * Speichern (M3). */
-            foreach (ev_mqtt_abraeumen_nach($ev_zalt, $ev_neu) as $ev_a) {
-                if ($ev_a[1] === '') { continue; }
-                if ($ev_a[0] === 0) { $ev_meldungen[] = $ev_a[1]; } else { $ev_fehler[] = $ev_a[1]; }
-            }
-        } else {
-            $ev_fehler[] = ev_t('EINST.SICH_SCHREIBFEHLER');
-        }
+        /* 0.9.59: das gemeinsame Sicherungsmodul (sicherung_zurueckspielen(), Beschreibung
+         * ev_sicherung_beschreibung()) liest, prueft, verwirft Unbekanntes mit Namen, laesst leere
+         * Werte den bisherigen stehen und aendert bei einer Beanstandung GAR NICHTS (alle
+         * Beanstandungen, nicht nur die erste). ev_config_write() schreibt Konfiguration und
+         * Zweitschrift; das Modul misst danach, ob die Zweitschrift inhaltsgleich ist. */
+        $ev_b = ev_sicherung_beschreibung();
+        $ev_b['speichern'] = function ($neu) { return ev_config_write($neu); };
+        $ev_b['zweitschrift'] = function () { $p = ev_paths(); return array($p['config'], $p['sicherung']); };
+        $ev_b['nachziehen'] = function ($neu, $jetzt, $r) use (&$ev_fehler, &$ev_bruecke_melden) {
+            list($h, $f) = ev_sicherung_nachziehen($neu, $jetzt, $r);
+            foreach ($f as $x) { $ev_fehler[] = $x; }
+            $ev_bruecke_melden = true;     // Gruppe 4 / MQTT (0.9.45, E6)
+            return $h;
+        };
+        $ev_b['log'] = 'ev_log';
+        $ev_r = sicherung_zurueckspielen($ev_b, $ev_roh);
+        $ev_m = sicherung_meldungen($ev_b, $ev_r);
+        foreach ($ev_m['fehler'] as $ev_x) { $ev_fehler[] = $ev_x; }
+        foreach ($ev_m['hinweise'] as $ev_x) { $ev_meldungen[] = $ev_x; }
     }
 }
 
@@ -926,6 +917,7 @@ if ($ev_altwerte) { ?>
     <?php echo ev_fmt(); ?>
     <input data-role="none" type="hidden" name="activetab" value="tab-settings">
     <input data-role="none" type="file" name="ev_sicherung" accept=".json">
+    <?= sicherung_haken_zeile(ev_sicherung_beschreibung()) ?>
     <button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="ev_zurueck" value="1"><?= ev_t('EINST.K_ZURUECK') ?></button>
   </form>
 </div>

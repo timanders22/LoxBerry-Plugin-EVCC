@@ -40,6 +40,10 @@ define('EV_FAHRZEUGE', 4);
  * mit weiteren Ausgabezielen, ev_mit_zielen(), Welle Mehrfach-Ziele). Liegt neben dieser Datei; die Datei schuetzt sich
  * selbst gegen doppeltes Laden. */
 require_once __DIR__ . '/sprachausgabe.php';
+/* Gemeinsames Sicherungsmodul (Abschrift von Werkzeuge/gemeinsam/sicherung.php, seit 0.9.59): "Einstellungen
+ * sichern" und "Einstellungen zurueckspielen" verhalten sich in allen Plugins des Hauses gleich. Liegt neben
+ * dieser Datei und schuetzt sich selbst gegen doppeltes Laden. */
+require_once __DIR__ . '/sicherung.php';
 
 /* ==================================================================
  * Pfade und Protokoll
@@ -4996,12 +5000,12 @@ function ev_wert_pruefen($schluessel, $wert)
  * Besteht ein Wert das Zurueckspielen? Rueckgabe '' oder die Beanstandung.
  *
  * EINE Pruefung fuer zwei Stellen (X-3, Verbesserungsbau 30.09.2026):
- * ev_sicherung_lesen() weist damit ab, und ev_sicherung_altwerte() sagt damit
+ * das Zurueckspielen (ev_sicherung_beschreibung()) weist damit ab, und ev_sicherung_altwerte() sagt damit
  * vor dem Sichern, welcher GESPEICHERTE Wert die eigene Sicherung zu Fall
  * braechte. Zwei Pruefungen liefen auseinander.
  *   - Form (ev_wert_taugt), Rand (nicht getrimmt, C9/O3), Regel (ev_wert_pruefen);
  *   - ein leeres Aktionstoken ist kein Mangel: es heisst "keins gesichert",
- *     und ev_sicherung_lesen() behaelt dann das geltende (O3).
+ *     und das Zurueckspielen behaelt dann das geltende (O3, Regel 3 des Moduls).
  */
 function ev_sicherung_wert_mangel($k, $w)
 {
@@ -5034,211 +5038,216 @@ function ev_sicherung_wert_mangel($k, $w)
  * Welche GESPEICHERTEN Werte wuerde das Zurueckspielen der eigenen Sicherung
  * abweisen? (X-3) Rueckgabe: die Schluessel, leer = keiner.
  *
- * Moeglich ist das, wo ev_config() einen Wert nicht selbst in die Form bringt:
- * ein von Hand eingetragenes Thema mit Schraegstrich am Rand ('evcc2lox/'),
- * eine Adresse oder ein Passwort mit Leerzeichen am Rand, ein Token mit
- * Zeichen ausserhalb von A-Z a-z 0-9 _ . -. Die Sicherung wird trotzdem
+ * Seit 0.9.59 dieselbe Pruefung wie beim Zurueckspielen ueber das gemeinsame
+ * Sicherungsmodul (sicherung_selbstpruefung()) an genau der Datei, die
+ * "Einstellungen sichern" liefert. Moeglich ist das, wo ev_config() einen Wert
+ * nicht selbst in die Form bringt: ein von Hand eingetragenes Thema mit
+ * Schraegstrich am Rand ('evcc2lox/'), eine Adresse oder ein Passwort mit
+ * Leerzeichen am Rand, ein Token mit Zeichen ausserhalb von A-Z a-z 0-9 _ . -,
+ * oder Sperren an ohne erlaubten Schreiber. Die Sicherung wird trotzdem
  * geliefert; die Seite sagt am Knopf, welcher Wert sie zu Fall braechte.
  */
 function ev_sicherung_altwerte($cfg = null)
 {
     if (!is_array($cfg)) { $cfg = ev_config(); }
-    $schlecht = array();
-    foreach (array_keys(ev_vorgaben()) as $k) {
-        if (array_key_exists($k, $cfg) && ev_sicherung_wert_mangel($k, $cfg[$k]) !== '') {
-            $schlecht[] = $k;
-        }
-    }
-    /* Energie-1 C1: Sperren an ohne erlaubten Schreiber weist das Zurueckspielen ab
-     * (Kreuzpruefung), also warnt auch der Knopf. */
-    if (ev_wache_kreuz($cfg) && !in_array('wache_erlaubt', $schlecht, true)) {
-        $schlecht[] = 'wache_erlaubt';
-    }
-    return $schlecht;
-}
-
-function ev_sicherung_lesen($roh)
-{
-    $mangel = array();
-    $hinweise = array();
-    $daten = json_decode((string) $roh, true);
-    if (!is_array($daten)) {
-        return array(null, array(ev_t('EINST.SICH_KEIN_JSON')), 0, array());
-    }
-    $neu = ev_vorgaben();
-    $bekannt = array_keys($neu);
-    $anzahl = 0;
-    foreach ($daten as $k => $w) {
-        /* Der lesbare Kopf wird UEBERGANGEN, nicht beanstandet. Er ist keine
-         * Einstellung, sondern die Auskunft, aus welcher Anlage und aus
-         * welcher Fassung die Datei stammt. Bis 0.9.26 hat der Leser ihn als
-         * fremden Schluessel abgelehnt - und damit die eigene Sicherung,
-         * sobald sie einen bekam. */
-        if ((string) $k !== '' && substr((string) $k, 0, 1) === '_') {
-            continue;
-        }
-        if ($k === 'ansage_token_herkunft') { continue; }     // 0.9.50: nie aus einer Datei
-        if (!in_array($k, $bekannt, true)) {
-            $mangel[] = sprintf(ev_t('EINST.SICH_FREMD'), ev_e((string) $k));
-            continue;
-        }
-        if ($k === 'tts') {
-            /* Nr. 36 b (Stufe 2): eine Sicherung dieses Plugins traegt nie ein Sprechtoken - traegt die
-             * Datei eines, wird sie abgewiesen. Die geltenden Sprechtoken bleiben; Ausgabeart, Adresse und
-             * Vorlage werden wie im Formular geprueft (Heimnetz). */
-            $ev_tm = ansage_sicherung_mangel($w);
-            if ($ev_tm) {
-                $mangel[] = sprintf(ev_t('DURCHSAGE.SICH_TOKEN'), ev_e(implode(', ', $ev_tm)));
-                continue;
-            }
-            $ev_tg = '';
-            $ev_tp = ansage_wert_pruefen($w, $ev_tg, ev_ansage_modi());
-            if ($ev_tp === null) {
-                $mangel[] = sprintf(ev_t('DURCHSAGE.SICH_WERT'), ev_e(ansage_kennung_text($ev_tg, ev_ansage_k())));
-                continue;
-            }
-            $ev_tj = ev_tts(ev_config());
-            /* Welle Mehrfach-Ziele (0.9.48): "$ev_tp + $ev_tj" behielt die geltenden weiteren Ziele einer Sicherung ohne
-             * Liste schon bisher - still. Jetzt geht der Block vorher durch die Spaetliste, und der Hinweis nennt sie. */
-            $ev_tneu = array('tts' => $ev_tp);
-            $ev_tjetzt = array('tts' => $ev_tj);
-            $ev_zspaet = array();
-            /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1, Spaetliste): fehlt die Liste der weiteren Ziele in der Sicherung (Datei einer
-             * aelteren Fassung), gelten die jetzigen weiteren Ziele weiter - genannt im Hinweis. Eine Sicherung MIT leerer Liste
-             * heisst "keine weiteren Ziele" und wird so uebernommen. */
-            $ev_spaete = array();
-            if (isset($ev_tneu['tts']) && is_array($ev_tneu['tts']) && function_exists('ansage_sicherung_spaet')) {
-                list($ev_tneu['tts'], $ev_spaete) = ansage_sicherung_spaet($ev_tneu['tts'],
-                    (isset($ev_tjetzt['tts']) && is_array($ev_tjetzt['tts'])) ? $ev_tjetzt['tts'] : null);
-            }
-            foreach ($ev_spaete as $ev_sn) { $ev_zspaet[] = $ev_sn; }     // Welle Mehrfach-Ziele: tts.ziele (Spaetliste)
-            if ($ev_zspaet) { $hinweise[] = sprintf(ev_t('EINST.SICH_SPAET'), ev_e(implode(', ', $ev_zspaet))); }
-            list($ev_tv) = ansage_vervollstaendigen($ev_tneu['tts'] + $ev_tj);
-            $neu['tts'] = ansage_sicherung_tokens_behalten($ev_tv, $ev_tj);
-            $anzahl++;
-            continue;
-        }
-        /* Form, Rand und Regel prueft EINE Funktion - dieselbe, mit der
-         * "Einstellungen sichern" vorher warnt (X-3). */
-        $ev_wm = ev_sicherung_wert_mangel($k, $w);
-        if ($ev_wm !== '') {
-            $mangel[] = $ev_wm;
-            continue;
-        }
-        /* Ein LEERES Aktionstoken in der Sicherung heisst "keins gesichert"
-         * (O3, Regeln/05, VolkswagenID-Aufloesung): das geltende bleibt, und
-         * die Seite sagt es. Bis 0.9.33 wurde es uebernommen - danach
-         * antwortete der Endpunkt jedem Virtuellen Eingang mit 503, und die
-         * Meldung lautete "12 Werte uebernommen" (Pruefbericht oberflaeche,
-         * Befund 4). */
-        if ($k === 'aktionstoken' && (string) $w === '') {
-            $ev_jetzt = (string) ev_config()['aktionstoken'];
-            $neu[$k] = $ev_jetzt;
-            $hinweise[] = ev_t($ev_jetzt !== '' ? 'EINST.SICH_TOKEN_BLEIBT' : 'EINST.SICH_TOKEN_KEINS');
-            $anzahl++;
-            continue;
-        }
-        $neu[$k] = $w;
-        $anzahl++;
-    }
-    if ($anzahl === 0) {
-        $mangel[] = ev_t('EINST.SICH_LEER');
-    }
-    /* FEHLENDE Schluessel sind eine Beanstandung, kein stiller Rueckfall.
-     *
-     * Eine Datei mit einem einzigen Schluessel lief bis 0.9.26 ohne
-     * Beanstandung durch, und alle uebrigen Einstellungen fielen auf Werk
-     * zurueck - quittiert mit "1 Wert uebernommen" (gemessen an VolkswagenID
-     * 0.9.11 am 03.09.2026, am 07.09.2026 ueber den Bestand ausgerollt). Der
-     * Hausstandard sagt: eine halb gueltige Datei aendert gar nichts. */
-    $fehlend = array();
-    $ev_behalten = array();
-    $ev_abehalten = array();
-    $ev_jetzt_cfg = null;
-    foreach (array_keys(ev_vorgaben()) as $fk) {
-        if ($fk === 'ansage_token_herkunft') {     // 0.9.50: der Vermerk bleibt der geltende
-            if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
-            $neu[$fk] = $ev_jetzt_cfg[$fk];
-            continue;
-        }
-        if (!array_key_exists($fk, $daten)) {
-            /* Energie-1 C1: eine Sicherung von vor der Schreiber-Wache kennt deren
-             * Einstellungen nicht. Sie ist trotzdem vollstaendig; die geltenden Werte
-             * der Wache bleiben, und die Seite sagt es (wie Marstek 1.1.19). */
-            /* Nr. 36 b: ebenso die Ansage (tts und die Anlaesse) aus einer Sicherung von vor 0.9.39. */
-            if (in_array($fk, ev_ansage_schluessel(), true)) {
-                if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
-                $neu[$fk] = $ev_jetzt_cfg[$fk];
-                $ev_abehalten[] = $fk;
-                continue;
-            }
-            /* Gruppe 4 / MQTT (0.9.45): eine Sicherung von vor 0.9.45 kennt "Befehle ueber MQTT annehmen"
-             * nicht; der Haken steht danach aus (ab Werk), und die Seite sagt es. */
-            if ($fk === 'befehle_mqtt_ein') {
-                $neu[$fk] = 0;
-                $hinweise[] = ev_t('BEFEHL.SICH_AUS');
-                continue;
-            }
-            if (in_array($fk, ev_wache_schluessel(), true)) {
-                if ($ev_jetzt_cfg === null) { $ev_jetzt_cfg = ev_config(); }
-                $neu[$fk] = $ev_jetzt_cfg[$fk];
-                $ev_behalten[] = $fk;
-                continue;
-            }
-            $fehlend[] = $fk;
-        }
-    }
-    if ($fehlend) {
-        $mangel[] = sprintf(ev_t('EINST.SICH_FEHLEND'), count($fehlend),
-            htmlspecialchars(implode(', ', $fehlend), ENT_QUOTES, 'UTF-8'));
-    }
-    if ($ev_behalten) {
-        $hinweise[] = sprintf(ev_t('EINST.SICH_WACHE_BEHALTEN'), ev_e(implode(', ', $ev_behalten)));
-    }
-    if ($ev_abehalten) {
-        $hinweise[] = sprintf(ev_t('DURCHSAGE.SICH_BEHALTEN'), ev_e(implode(', ', $ev_abehalten)));
-    }
-    /* Energie-1 C1: Sperren an ohne erlaubten Schreiber - dieselbe Kreuzpruefung wie
-     * das Formular. */
-    if (!$mangel && ev_wache_kreuz($neu)) {
-        $mangel[] = ev_t('EINST.SICH_WACHE_KREUZ');
-    }
-    return array($mangel ? null : $neu, $mangel, $anzahl, $mangel ? array() : $hinweise);
+    $daten = ev_sicherung_daten($cfg);
+    unset($daten['_warnung']);
+    return sicherung_selbstpruefung(ev_sicherung_beschreibung(), $daten, $cfg);
 }
 
 /**
- * Die Sicherung, die "Einstellungen sichern" ausgibt (O3, seit 0.9.34): der
- * lesbare Kopf und NUR die bekannten Schluessel. Bis 0.9.33 ging die ganze
- * Konfiguration hinaus; stand darin ein fremder Schluessel (Rest einer
- * Handbearbeitung), wies das Zurueckspielen die eigene Sicherung ab
- * (Pruefbericht oberflaeche, Befund 6).
+ * 0.9.59: Die Beschreibung dieser Linie fuer das gemeinsame Sicherungsmodul
+ * (Werkzeuge/gemeinsam/sicherung.php, Auftrag des Hausherrn 12.11.2026). Lesen,
+ * Pruefen und Zurueckspielen macht das Modul; bis 0.9.58 stand hier eine eigene
+ * Schleife (ev_sicherung_lesen()): ein unbekannter Schluessel - oben wie in den
+ * Bloecken tts und ansage_regeln - wies die ganze Datei ab, und eine Datei ohne
+ * Kennzeichen oder mit dem eines anderen Plugins wurde gelesen wie eine eigene
+ * (gemessen 14.11.2026 an 0.9.58 mit Werkzeuge/sicherung_pruefstand.py --profil
+ * ist, Klasse A).
+ *
+ * Seither: der Kopf traegt _plugin = 'LoxBerry-Plugin-EVCC' (Name des
+ * Repositorys; bis 0.9.58 gab es kein Kennzeichen) und _fassung; eine Datei mit
+ * fremdem Kennzeichen wird abgewiesen, eine ohne nur dann gelesen, wenn sie eine
+ * aeltere eigene Sicherung ist (ev_sicherung_alt_erkennen(), ab 0.9.27);
+ * unbekannte Schluessel oben und in den Bloecken werden verworfen und mit Namen
+ * gemeldet; ein leerer Wert ueberschreibt keinen bestehenden.
+ *
+ * Wie bisher: jeder Wert geht durch ev_sicherung_wert_mangel() (Form, Rand ohne
+ * Trimmen, Regel aus ev_wert_pruefen() - dieselbe Positivliste wie das
+ * Formular); der Block tts durch ansage_wert_pruefen() (eine Datei mit
+ * Sprechtoken wird abgewiesen); Sperren an ohne erlaubten Schreiber wird
+ * abgewiesen (ev_wache_kreuz()); eine halb gueltige Datei aendert nichts, alle
+ * Beanstandungen werden gesammelt; der Vermerk ansage_token_herkunft kommt nie
+ * aus einer Datei und behaelt seinen geltenden Wert (Modul 1.2.1).
+ *
+ * Was fehlen darf (Regeln/05, Entscheidung des Hausherrn 12.11.2026 "Ja,
+ * behalten"): ev_sicherung_spaete_schluessel() behalten den geltenden Wert und
+ * werden genannt, ebenso die Liste der weiteren Ziele im Block tts. Bis 0.9.58
+ * ging befehle_mqtt_ein dabei auf 0, und die Schluessel ausserhalb der drei
+ * Listen (Ansage, Schreiber-Wache, Befehle) liessen die Datei abweisen.
  */
-function ev_sicherung_bauen()
+function ev_sicherung_beschreibung()
 {
-    $kopf = array(
-        '_hinweis' => 'Sicherung des LoxBerry-Plugins EVCC. Enthaelt das '
-                    . 'Aktionstoken dieser Anlage und gegebenenfalls das '
-                    . 'EVCC-Passwort - wie ein Passwort behandeln. Die Sprechtoken der '
-                    . 'Sprachausgabe sind nie enthalten.',
-        '_stand'   => date('Y-m-d H:i:s'),
+    $p = ev_paths();
+    $tts_s = array_merge(array_keys(ansage_vorgaben()), ansage_geheim());
+    $tts_knoten = array();
+    if (ev_mit_zielen()) {
+        $tts_s[] = 'ziele';
+        $tts_knoten['ziele'] = sicherung_liste(array('art', 'wo', 'laut', 'sprache', 'ein')) + array('fehlt' => 'behalten');
+    }
+    $schluessel = array(
+        'tts' => sicherung_block($tts_s, $tts_knoten) + array(
+            'sichern' => 'ansage_sicherung_bereinigen',
+            'pruefen' => function ($w, $k = '', $neu = null, $roh = null) {
+                /* Nr. 36 b (Stufe 2): eine Sicherung dieses Plugins traegt nie ein Sprechtoken - traegt die Datei
+                 * eines, wird sie abgewiesen. Gemessen am Block der DATEI, denn Regel 3 des Moduls setzt ein leeres
+                 * Feld vorher auf den geltenden Wert. */
+                $tm = ansage_sicherung_mangel($roh);
+                if ($tm) {
+                    return sprintf(ev_t('DURCHSAGE.SICH_TOKEN'), ev_e(implode(', ', $tm)));
+                }
+                $g = '';
+                if (!is_array($w) || ansage_wert_pruefen(ansage_sicherung_bereinigen($w), $g, ev_ansage_modi()) === null) {
+                    return sprintf(ev_t('DURCHSAGE.SICH_WERT'), ev_e(ansage_kennung_text($g, ev_ansage_k())));
+                }
+                return '';
+            },
+            'wandeln' => function ($w) {
+                $g = '';
+                return ansage_wert_pruefen(ansage_sicherung_bereinigen($w), $g, ev_ansage_modi());
+            }),
+        'ansage_regeln' => sicherung_block(array_keys(ansage_regeln_vorgaben())),
     );
-    /* X-3: Wuerde ein gespeicherter Wert das Zurueckspielen nicht bestehen,
-     * sagt es auch die Datei - nur der Schluessel, nie der Wert. Ein Schluessel
-     * mit Unterstrich wird beim Zurueckspielen uebergangen. */
-    $ev_cfg = ev_config();
-    $ev_alt = ev_sicherung_altwerte($ev_cfg);
-    if ($ev_alt) {
-        $kopf['_warnung'] = 'Diese Sicherung wird beim Zurueckspielen abgewiesen, solange '
-                          . 'diese Werte unzulaessig sind: ' . implode(', ', $ev_alt)
-                          . '. In der Oberflaeche berichtigen und neu sichern.';
+    foreach (ev_sicherung_spaete_schluessel() as $s) {
+        if (!isset($schluessel[$s])) { $schluessel[$s] = array(); }
+        $schluessel[$s]['fehlt'] = 'behalten';
     }
-    $ev_aus = array_intersect_key($ev_cfg, ev_vorgaben());
-    /* Nr. 36 b: die Sprechtoken der Sprachausgabe gehen nie in eine Sicherung. */
-    if (isset($ev_aus['tts']) && is_array($ev_aus['tts'])) {
-        $ev_aus['tts'] = ansage_sicherung_bereinigen($ev_aus['tts']);
+    return array(
+        'kennzeichen' => 'LoxBerry-Plugin-EVCC',
+        /* Der Kopftext wie bis 0.9.58: ev_sicherung_alt_erkennen() erkennt aeltere Sicherungen an seinem Anfang. */
+        'hinweis' => 'Sicherung des LoxBerry-Plugins EVCC. Enthaelt das '
+                   . 'Aktionstoken dieser Anlage und gegebenenfalls das '
+                   . 'EVCC-Passwort - wie ein Passwort behandeln. Die Sprechtoken der '
+                   . 'Sprachausgabe sind nie enthalten.',
+        /* Die Fassung im Kopf kommt aus der Plugin-Datenbank bzw. plugin.cfg - keine fuenfte Stelle neben den
+         * vier, die Werkzeuge/fassung_setzen.py pflegt. */
+        'home' => (string) $p['home'], 'ordner' => (string) $p['plugin'],
+        'plugin_cfg' => dirname(dirname(__DIR__)) . '/plugin.cfg',
+        'vorgaben' => ev_vorgaben(),
+        'schluessel' => $schluessel,
+        'nie_aus_datei' => array('ansage_token_herkunft'),
+        'pruefen' => function ($k, $w) {
+            return ev_sicherung_wert_mangel($k, $w);
+        },
+        'quer' => function ($neu) {
+            /* Energie-1 C1: Sperren an ohne erlaubten Schreiber - dieselbe Kreuzpruefung wie das Formular. */
+            return ev_wache_kreuz($neu) ? array(array('wache_erlaubt', ev_t('EINST.SICH_WACHE_KREUZ'))) : array();
+        },
+        'uebersetzer' => 'ev_sicherung_alt_erkennen',
+        'vorbereiten' => 'ev_sicherung_vorbereiten',
+        'jetzt' => function () { return ev_config(); },
+        't' => 'ev_t',
+        'e' => 'ev_e',
+    );
+}
+
+/**
+ * 0.9.59: Die Schluessel, die eine aeltere Sicherung dieser Linie noch nicht
+ * kennen konnte. Fehlen sie, behalten sie den geltenden Wert, und die Meldung
+ * nennt sie (Regeln/05 Punkt 6, gemessen mit Werkzeuge/sicherung_pruefstand.py
+ * --alt alle an allen Fassungen mit Kopf).
+ */
+function ev_sicherung_spaete_schluessel()
+{
+    return array_merge(ev_ansage_schluessel(), ev_wache_schluessel(),
+                       array('befehle_mqtt_ein', 'mqtt_vollsend_min'));
+}
+
+/**
+ * 0.9.59: Eine Sicherung dieser Linie aus der Zeit vor dem Kennzeichen _plugin
+ * (0.9.27 bis 0.9.58) traegt den lesbaren Kopf _hinweis, den nur der
+ * Sichern-Knopf dieser Linie schreibt, fest im Code und in jeder Sprache gleich.
+ * Gemessen 14.11.2026 an allen Fassungen 0.9.24 bis 0.9.58 (Ordner und
+ * Archive): ab 0.9.27 ein einziger Wortlaut, er beginnt mit "Sicherung des
+ * LoxBerry-Plugins EVCC. Enthaelt das". Daran wird sie erkannt. 0.9.24 bis
+ * 0.9.26 schrieben keinen Kopf; eine solche Datei ist nicht sicher von einer
+ * fremden zu unterscheiden und wird abgewiesen (Entscheidung des Hausherrn
+ * 12.11.2026). Rueckgabe: die Daten oder null.
+ */
+function ev_sicherung_alt_erkennen($d)
+{
+    return (is_array($d) && isset($d['_hinweis']) && is_string($d['_hinweis'])
+            && strpos($d['_hinweis'], 'Sicherung des LoxBerry-Plugins EVCC. Enthaelt das') === 0)
+        ? $d : null;
+}
+
+/**
+ * Die Sicherung, die "Einstellungen sichern" ausgibt: der lesbare Kopf
+ * (_hinweis, _plugin, _fassung, _stand, bei Bedarf _warnung) und alle
+ * Schluessel der Vorgaben aus der geltenden Konfiguration, gebaut vom
+ * gemeinsamen Sicherungsmodul (sicherung_bauen()). Nur bekannte Schluessel (O3,
+ * seit 0.9.34): ein fremder Schluessel aus einer Handbearbeitung geht nicht
+ * mit. Die Sprechtoken gehen nie mit (Nr. 36 b), der Vermerk
+ * ansage_token_herkunft auch nicht. X-3 wie bisher: wuerde das eigene
+ * Zurueckspielen die Datei abweisen, nennt _warnung die Namen, nie Werte;
+ * geliefert wird sie trotzdem.
+ */
+function ev_sicherung_daten($cfg = null)
+{
+    if (!is_array($cfg)) { $cfg = ev_config(); }
+    return sicherung_bauen(ev_sicherung_beschreibung(), $cfg);
+}
+
+/**
+ * 0.9.59: Vor dem Speichern (Rueckruf 'vorbereiten' des Moduls). Der Block tts
+ * wird wie bis 0.9.58 vervollstaendigt: fehlende Felder nehmen den geltenden
+ * Wert, die geltenden Sprechtoken bleiben (die Sicherung traegt keine).
+ * Kam der Block gar nicht aus der Datei (aeltere Sicherung), steht dort schon
+ * der geltende.
+ */
+function ev_sicherung_vorbereiten($neu, $jetzt, $r)
+{
+    if (!in_array('tts', $r['fehlt_behalten'], true) && isset($neu['tts']) && is_array($neu['tts'])) {
+        $tj = ev_tts(is_array($jetzt) ? $jetzt : array());
+        list($t) = ansage_vervollstaendigen($neu['tts'] + $tj, 'aus');
+        $neu['tts'] = ansage_sicherung_tokens_behalten($t, $tj);
     }
-    unset($ev_aus['ansage_token_herkunft']);     // 0.9.50
-    return $kopf + $ev_aus;
+    return $neu;
+}
+
+/**
+ * 0.9.59: Nach dem Zurueckspielen nachziehen und sagen, was mit dem Abruf
+ * geschah (Regeln/05). Rueckgabe array(Hinweise, Fehler), fertig maskiert.
+ *
+ *  - Das Aktionstoken: eine Sicherung mit leerem Token behaelt das geltende
+ *    (Regel 3 des Moduls); die Seite sagt dazu, was das fuer die Adressen im
+ *    Miniserver heisst (O3, wie bis 0.9.58).
+ *  - Die Abo-Datei des MQTT-Gateways folgt dem zurueckgespielten Praefix
+ *    (ev_abo_datei(), Gruppe 4 / MQTT, 0.9.45).
+ *  - Eine Sicherung kann das Praefix, den MQTT-Schalter und die Zahl der
+ *    Ladepunkte aendern - dann dasselbe Abraeumen wie beim Speichern (M3).
+ *  - Der Abruf (bin/ev_abruf.php im Minutentakt) liest die Einstellungen bei
+ *    jedem Lauf neu; es gibt keinen Dienst, der neu zu starten waere. Die
+ *    Befehlsbruecke schaltet der Aufrufer danach sofort (ev_bruecke_schalten()).
+ */
+function ev_sicherung_nachziehen($neu, $jetzt, $r)
+{
+    $hinweise = array();
+    $fehler = array();
+    if (in_array('aktionstoken', $r['leer_behalten'], true)) {
+        $hinweise[] = ev_t('EINST.SICH_TOKEN_BLEIBT');
+    } elseif (isset($neu['aktionstoken']) && (string) $neu['aktionstoken'] === '') {
+        $hinweise[] = ev_t('EINST.SICH_TOKEN_KEINS');
+    }
+    if (isset($neu['mqtt_topic'])) {
+        ev_abo_datei((string) $neu['mqtt_topic'], true);
+    }
+    foreach (ev_mqtt_abraeumen_nach(is_array($jetzt) ? $jetzt : array(), $neu) as $a) {
+        if ($a[1] === '') { continue; }
+        if ($a[0] === 0) { $hinweise[] = $a[1]; } else { $fehler[] = $a[1]; }
+    }
+    $hinweise[] = ev_t('EINST.SICH_DIENST_TAKT');
+    return array($hinweise, $fehler);
 }
 
 

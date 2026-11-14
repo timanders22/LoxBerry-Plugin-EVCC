@@ -9,6 +9,18 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.59
+
+- **Verhalten geändert – Einstellungen sichern und zurückspielen nach der gemeinsamen Vorlage:** Die Knöpfe „Einstellungen sichern“ und „Einstellungen zurückspielen“ arbeiten jetzt mit demselben Sicherungsmodul (1.2.2) wie die übrigen Plugins dieser Reihe.
+  - Die Sicherungsdatei trägt im Kopf das Kennzeichen des Plugins (`_plugin` = `LoxBerry-Plugin-EVCC`) und die Fassung (`_fassung`). Eine Datei eines anderen Plugins und eine Datei ohne Kennzeichen werden als Ganzes abgewiesen. Sicherungen von 0.9.27 bis 0.9.58 werden an ihrem Kopf `_hinweis` erkannt und weiter angenommen; die Meldung sagt das. Sicherungen von 0.9.24 bis 0.9.26 hatten keinen Kopf und werden abgewiesen (bis 0.9.58 angenommen).
+  - Eine Einstellung, die diese Fassung nicht kennt, wird nicht übernommen und mit ihrem Namen gemeldet, nie mit ihrem Wert – oben in der Datei und in den Blöcken (Sprachausgabe, Ansageregeln). Die übrigen Einstellungen werden zurückgespielt. Bisher wies ein unbekannter Name die ganze Datei ab.
+  - Ein leerer Wert in der Sicherung überschreibt keinen bestehenden; der bisherige Wert bleibt, und die Meldung nennt den Namen. Bisher galt das nur für das Aktionstoken.
+  - Fehlt einer Sicherung eine Einstellung, die ihre Fassung noch nicht kannte, behält diese ihren geltenden Wert, und die Meldung nennt sie. Bisher wurden Sicherungen von 0.9.27 bis 0.9.32 abgewiesen, weil ihnen der Vollversand-Abstand fehlte, und „Befehle über MQTT annehmen“ ging bei einer Sicherung von vor 0.9.45 auf aus.
+  - Die Meldung sagt, was mit dem Abruf geschieht: Er liest die Einstellungen bei jedem Lauf im Minutentakt neu; neu gestartet wird nichts.
+- **Verhalten geändert – Zurückspielen nur mit Haken:** Zwischen dem Feld für die Sicherungsdatei und dem Knopf „Einstellungen zurückspielen“ steht ein Haken „Ja, die geltenden Einstellungen durch die Sicherung ersetzen“, ab Werk aus. Ohne ihn wird die Datei nicht gelesen und nichts geändert, und die Meldung sagt es. Haken, Text und die Prüfung der hochgeladenen Datei (über das Formular gekommen, höchstens 256 KB, bisher 64 KB) kommen aus dem gemeinsamen Sicherungsmodul und sind in allen Plugins dieser Reihe gleich.
+- Unverändert: Eine Datei mit einem unzulässigen Wert ändert gar nichts, alle Beanstandungen werden genannt. Aktionstoken und EVCC-Passwort gehören in die Datei, die Sprechtoken nicht; eine Datei mit Sprechtoken wird abgewiesen. „Fremde Schreiber abweisen“ ohne erlaubten Schreiber wird abgewiesen. Die Zweitschrift zieht mit, die Abo-Datei des MQTT-Gateways und die Befehlsbrücke folgen dem zurückgespielten Stand.
+- Am Gerät nicht gemessen. Gemessen wurde mit einem Prüfstand unter PHP 7.4 und 8.4 auf dem Arbeitsrechner, der über einen Webserver die echten Knöpfe drückt, mit den Sicherungen aller 35 Vorfassungen von 0.9.24 bis 0.9.58.
+
 ## Neu in 0.9.58
 
 Pflegefassung aus der Nachtprüfung vom 12.11.2026. Werte, MQTT-Themen und Loxone-Namen bleiben, wie sie sind.
