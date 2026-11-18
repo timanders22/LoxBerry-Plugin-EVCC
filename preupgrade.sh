@@ -75,7 +75,8 @@ PDIR="${ARGV3:-evcc}"
 EV_MARKE="$BASE/data/plugins/$PDIR.upgrade_laeuft"
 EV_MARKE_VORHER=0
 [ -e "$EV_MARKE" ] && EV_MARKE_VORHER=1
-if ! touch "$EV_MARKE" 2>/dev/null; then
+# Frage 69/72 (18.11.2026): die Marke traegt die Unixzeit wie in allen Linien (Takt-Stammblock).
+if ! { date +%s > "$EV_MARKE"; } 2>/dev/null; then
     echo "<FAIL> Die Marke $EV_MARKE liess sich nicht anlegen - Platz und Rechte unter"
     echo "<FAIL> $BASE/data/plugins pruefen. Das Update wird abgebrochen."
     exit 2
