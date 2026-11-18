@@ -5208,7 +5208,12 @@ function ev_sicherung_daten($cfg = null)
 function ev_sicherung_vorbereiten($neu, $jetzt, $r)
 {
     if (!in_array('tts', $r['fehlt_behalten'], true) && isset($neu['tts']) && is_array($neu['tts'])) {
-        $tj = ev_tts(is_array($jetzt) ? $jetzt : array());
+        // 0.9.60 (Modul 1.2.9, Bauform vom 15.11.2026): vom geltenden Block bleibt nur, was die Linie kennt (die
+        // Felder des Knotens tts in ev_sicherung_beschreibung()); ein unbekannter Unterschluessel faellt beim
+        // Zurueckspielen weg, und das Modul nennt ihn beim Namen, statt dass er still stehen bleibt.
+        $bek = array_merge(array_keys(ansage_vorgaben()), ansage_geheim());
+        if (ev_mit_zielen()) { $bek[] = 'ziele'; }
+        $tj = array_intersect_key(ev_tts(is_array($jetzt) ? $jetzt : array()), array_flip($bek));
         list($t) = ansage_vervollstaendigen($neu['tts'] + $tj, 'aus');
         $neu['tts'] = ansage_sicherung_tokens_behalten($t, $tj);
     }
