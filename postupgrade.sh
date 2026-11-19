@@ -69,8 +69,27 @@ ev_bruecke_start() {
     esac
 }
 trap 'rm -f "$EV_MARKE" 2>/dev/null; ev_bruecke_start' EXIT
-if [ ! -e "$EV_MARKE" ]; then
-    echo "<WARNING> Es fehlt die Marke einer laufenden Aktualisierung ($EV_MARKE)."
+# Upgrade-Marke nach der gemeinsamen Regel (Frage 112, 19.11.2026): Codezeilen wortgleich mit dem
+# Stammblock Werkzeuge/gemeinsam/takt_upgrade_marke.txt (Minutentakt), hier aber als Bedingung statt
+# "exit 0". UPGM_GILT=1 heisst: eine Aktualisierung laeuft - die Marke enthaelt eine Unixzeit, die nicht
+# in der Zukunft liegt und juenger als 3600 s ist. Eine aeltere Marke, eine aus der Zukunft und eine
+# ohne Unixzeit gelten nicht; liefert die Uhr keine Zahl, gilt sie (geschlossen ausfallen). Bis 0.9.63
+# galt hier jede liegende Marke, gleich wie alt und welchen Inhalts.
+UPGM_MARKE="$EV_MARKE"
+UPGM_GILT=0
+if [ -f "$UPGM_MARKE" ]; then
+    upgm_jetzt=$(date +%s 2>/dev/null); upgm_seit=$(cat "$UPGM_MARKE" 2>/dev/null)
+    case "$upgm_seit" in ''|*[!0-9]*) upgm_seit=0 ;; esac
+    case "$upgm_jetzt" in ''|*[!0-9]*|0) UPGM_GILT=1 ;; esac
+    if [ "$UPGM_GILT" = 0 ] && [ "$upgm_seit" -le "$upgm_jetzt" ] && [ $((upgm_jetzt - upgm_seit)) -lt 3600 ]; then UPGM_GILT=1; fi
+fi
+if [ "$UPGM_GILT" != 1 ]; then
+    if [ -e "$EV_MARKE" ]; then
+        echo "<WARNING> Die Marke einer laufenden Aktualisierung ($EV_MARKE) gilt nicht: sie ist eine"
+        echo "<WARNING> Stunde oder aelter, liegt in der Zukunft oder enthaelt keine Unixzeit."
+    else
+        echo "<WARNING> Es fehlt die Marke einer laufenden Aktualisierung ($EV_MARKE)."
+    fi
     echo "<WARNING> Es wird nichts zurueckgespielt; eine Sicherung unter $SICHER bleibt liegen."
     exit 0
 fi

@@ -78,8 +78,22 @@ fi
 # (Pruefbericht installer, B3).
 # Gruppe 4 / MQTT (0.9.45): bei einer Neuinstallation die Befehlsbruecke starten (startet nur mit dem Haken
 # "Befehle ueber MQTT annehmen", ab Werk aus). Bei einem Update startet sie postupgrade.sh nach der Marke.
+# Upgrade-Marke nach der gemeinsamen Regel (Frage 112, 19.11.2026): Codezeilen wortgleich mit dem
+# Stammblock Werkzeuge/gemeinsam/takt_upgrade_marke.txt (Minutentakt), hier aber als Bedingung statt
+# "exit 0". UPGM_GILT=1 heisst: eine Aktualisierung laeuft - die Marke enthaelt eine Unixzeit, die nicht
+# in der Zukunft liegt und juenger als 3600 s ist. Eine aeltere Marke, eine aus der Zukunft und eine
+# ohne Unixzeit gelten nicht; liefert die Uhr keine Zahl, gilt sie (geschlossen ausfallen). Bis 0.9.63
+# galt hier jede liegende Marke, gleich wie alt und welchen Inhalts.
+UPGM_MARKE="$BASE/data/plugins/$PDIR.upgrade_laeuft"
+UPGM_GILT=0
+if [ -f "$UPGM_MARKE" ]; then
+    upgm_jetzt=$(date +%s 2>/dev/null); upgm_seit=$(cat "$UPGM_MARKE" 2>/dev/null)
+    case "$upgm_seit" in ''|*[!0-9]*) upgm_seit=0 ;; esac
+    case "$upgm_jetzt" in ''|*[!0-9]*|0) UPGM_GILT=1 ;; esac
+    if [ "$UPGM_GILT" = 0 ] && [ "$upgm_seit" -le "$upgm_jetzt" ] && [ $((upgm_jetzt - upgm_seit)) -lt 3600 ]; then UPGM_GILT=1; fi
+fi
 BBSH="$BASE/bin/plugins/$PDIR/befehlsbruecke.sh"
-if [ ! -f "$BASE/data/plugins/$PDIR.upgrade_laeuft" ] && [ -f "$BBSH" ]; then
+if [ "$UPGM_GILT" != 1 ] && [ -f "$BBSH" ]; then
     BB_AUS=$(timeout 40 bash "$BBSH" start 2>&1 | head -n 1)
     case "$BB_AUS" in
         *gestartet*|*laeuft*) echo "<OK> Befehlsbruecke: $BB_AUS" ;;
@@ -88,7 +102,7 @@ if [ ! -f "$BASE/data/plugins/$PDIR.upgrade_laeuft" ] && [ -f "$BBSH" ]; then
     esac
 fi
 
-if [ -f "$BASE/data/plugins/$PDIR.upgrade_laeuft" ]; then
+if [ "$UPGM_GILT" = 1 ]; then
     echo "<OK> Aktualisierung: postupgrade.sh spielt Einstellungen und Zugriffstoken gleich"
     echo "<OK> zurueck. Es ist nichts neu einzutragen."
 else

@@ -68,8 +68,9 @@ PDIR="${ARGV3:-evcc}"
 # 29.09.2026). preinstall.sh legt ohne sie liegengebliebene Zweitschriften
 # nach .alt, postupgrade.sh spielt nur mit ihr zurueck und raeumt sie ueber
 # einen trap ab, die Bibliothek legt waehrend der Luecke kein neues Token an,
-# und der Minutentakt ruht. Kein Altersvergleich. Lag sie schon (ein frueheres
-# Update brach ab), gilt sie weiter (Entscheidung 8, Frage 17). Bricht DIESES
+# und der Minutentakt ruht. Takt und Bibliothek lassen sie seit 0.9.62/0.9.63
+# nur gelten, solange sie juenger als 3600 s ist (Unixzeit im Inhalt, Frage 83;
+# bis dahin ohne Altersvergleich, Entscheidung 8, Frage 17). Bricht DIESES
 # Skript mit 2 ab, faellt die Marke wieder weg, wenn es sie selbst angelegt
 # hat - die alte Fassung bleibt dann unveraendert installiert.
 EV_MARKE="$BASE/data/plugins/$PDIR.upgrade_laeuft"

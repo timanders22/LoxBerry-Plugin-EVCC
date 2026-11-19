@@ -301,12 +301,18 @@ function ev_datei_schreiben($pfad, $inhalt, $modus = 0600)
  * Laeuft gerade eine Aktualisierung? (Entscheidung 1 vom 29.09.2026)
  *
  * preupgrade.sh legt als Erstes data/plugins/<ordner>.upgrade_laeuft an,
- * postupgrade.sh raeumt die Marke ueber einen trap ab. Kein Altersvergleich:
- * eine vergessene Marke gilt (Entscheidung 8, Frage 17). Solange sie liegt,
+ * postupgrade.sh raeumt die Marke ueber einen trap ab. Solange sie gilt,
  * entsteht kein neues Aktionstoken - in der Luecke zwischen dem Aufraeumen
  * des Installers und postupgrade.sh fehlt die Konfiguration, und ein Takt
  * haette dort ohne Zweitschrift ein neues Token gewuerfelt (Pruefbericht
  * installer, B10).
+ *
+ * 0.9.63 (Frage 83, Entscheidung des Hausherrn 19.11.2026): dieselbe Regel wie
+ * der Takt-Stammblock (Werkzeuge/gemeinsam/takt_upgrade_marke.txt) - der
+ * INHALT ist die Unixzeit, nicht aus der Zukunft, juenger als 3600 s; ohne
+ * Zahl oder aus der Zukunft gilt die Marke nicht. Bis 0.9.62 galt jede
+ * liegende Marke, gleich wie alt (Entscheidung 8, Frage 17 - fuer diese
+ * Abfrage abgeloest).
  */
 function ev_upgrade_marke()
 {
@@ -319,7 +325,11 @@ function ev_upgrade_laeuft()
     $m = ev_upgrade_marke();
     if ($m === '') { return false; }
     clearstatcache(true, $m);
-    return file_exists($m);
+    if (!is_file($m)) { return false; }
+    $roh = trim((string) @file_get_contents($m));
+    if (preg_match('/^[0-9]{1,12}$/', $roh) !== 1) { return false; }
+    $alter = time() - (int) $roh;
+    return $alter >= 0 && $alter < 3600;
 }
 
 /**

@@ -10,9 +10,10 @@
 # preupgrade :846, purge :874, preinstall :877).
 #
 # Eine Aktualisierung erkennt es allein an der Marke
-# data/plugins/<ordner>.upgrade_laeuft, die preupgrade.sh als Erstes anlegt
-# (kein Altersvergleich). Dann tut es nichts: die Zweitschrift und die
-# Upgrade-Sicherung braucht postupgrade.sh.
+# data/plugins/<ordner>.upgrade_laeuft, die preupgrade.sh als Erstes mit der
+# Unixzeit anlegt. Seit 0.9.63 nur, solange sie nach der gemeinsamen Regel
+# gilt (Frage 112, Block unten); bis dahin genuegte, dass sie lag. Dann tut
+# es nichts: die Zweitschrift und die Upgrade-Sicherung braucht postupgrade.sh.
 #
 # Ohne Marke ist es eine NEUINSTALLATION. Liegengebliebene Zweitschriften
 # einer frueheren Installation (config/plugins/<ordner>.backup.evcc.json mit
@@ -52,7 +53,21 @@ if [ -z "$BASE" ]; then
     echo "<WARNING> Kein LoxBerry-Wurzelverzeichnis erkannt ('$ARGV5') - nichts beiseitegelegt."
     exit 0
 fi
-[ -f "$BASE/data/plugins/$PFOLDER.upgrade_laeuft" ] && exit 0
+# Upgrade-Marke nach der gemeinsamen Regel (Frage 112, 19.11.2026): Codezeilen wortgleich mit dem
+# Stammblock Werkzeuge/gemeinsam/takt_upgrade_marke.txt (Minutentakt), hier aber als Bedingung statt
+# "exit 0". UPGM_GILT=1 heisst: eine Aktualisierung laeuft - die Marke enthaelt eine Unixzeit, die nicht
+# in der Zukunft liegt und juenger als 3600 s ist. Eine aeltere Marke, eine aus der Zukunft und eine
+# ohne Unixzeit gelten nicht; liefert die Uhr keine Zahl, gilt sie (geschlossen ausfallen). Bis 0.9.63
+# galt hier jede liegende Marke, gleich wie alt und welchen Inhalts.
+UPGM_MARKE="$BASE/data/plugins/$PFOLDER.upgrade_laeuft"
+UPGM_GILT=0
+if [ -f "$UPGM_MARKE" ]; then
+    upgm_jetzt=$(date +%s 2>/dev/null); upgm_seit=$(cat "$UPGM_MARKE" 2>/dev/null)
+    case "$upgm_seit" in ''|*[!0-9]*) upgm_seit=0 ;; esac
+    case "$upgm_jetzt" in ''|*[!0-9]*|0) UPGM_GILT=1 ;; esac
+    if [ "$UPGM_GILT" = 0 ] && [ "$upgm_seit" -le "$upgm_jetzt" ] && [ $((upgm_jetzt - upgm_seit)) -lt 3600 ]; then UPGM_GILT=1; fi
+fi
+[ "$UPGM_GILT" = 1 ] && exit 0
 
 BEISEITE=""
 FEST=""
