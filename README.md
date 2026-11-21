@@ -9,6 +9,10 @@ Weg nach Loxone: EVCC rechnet in Watt und veröffentlicht unter eigenen Namen,
 der Energiemanager will Kilowatt an vier bestimmten Anschlüssen. Dieses Plugin
 ist der Übersetzer dazwischen.
 
+## Neu in 0.9.64
+
+- Die Kopfzeile zeigt jetzt die installierte Fassung, einheitlich in allen Plugins.
+
 ## Neu in 0.9.63
 
 - **Geändert – PHP-Abfrage der Upgrade-Marke nach der gemeinsamen Regel:** Die Bibliothek lässt die Marke einer laufenden Aktualisierung jetzt nach derselben Regel gelten wie der Minutentakt: nur, wenn sie eine Unixzeit enthält, die nicht in der Zukunft liegt und weniger als eine Stunde zurückliegt. Bis 0.9.62 galt jede liegende Marke, gleich wie alt und gleich welchen Inhalts; eine liegengebliebene Marke verhinderte dann dauerhaft, dass bei einer neuen Einrichtung ein Aktionstoken entsteht, und dass fehlende Einstellungen in die Konfiguration nachgetragen werden. Während einer laufenden Aktualisierung bleibt beides gesperrt wie bisher. Gemessen auf dem Arbeitsrechner (WSL mit PHP 8.3, Windows mit PHP 7.4 und 8.4) an zehn Fällen, die Fassung 0.9.62 zur Gegenprobe; am Gerät nicht gemessen.

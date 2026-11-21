@@ -496,7 +496,8 @@ if ($ev_einmal !== null) {
 }
 
 if (class_exists('LBWeb', false)) {
-    LBWeb::lbheader(ev_t('ALLG.TITEL'), 'https://docs.evcc.io/', 'help.html');
+    require_once __DIR__ . '/fassung.php';   // Fassung im Titel: gemeinsames Stueck fassung.php (21.11.2026)
+    LBWeb::lbheader(plugin_kopftitel(ev_t('ALLG.TITEL'), __DIR__), 'https://docs.evcc.io/', 'help.html');
 }
 
 ?>
