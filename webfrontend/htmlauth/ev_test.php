@@ -198,6 +198,12 @@ function ev_pruefungen()
     $ev_klage_stand = array('ok' => 1, 'token_leer' => -1, 'fehlt' => 0, 'leer' => 0, 'kaputt' => 0, 'ohne_token' => 0);
     $z[] = ev_pruefzeile(isset($ev_klage_stand[$ev_klage]) ? $ev_klage_stand[$ev_klage] : -1, ev_t('TEST.F_KONFIG'),
         sprintf(ev_t('TEST.A_KONFIG_' . strtoupper($ev_klage)), ev_e($p['config'])));
+    /* 0.9.66: Lade-Beanstandungen (Regeln/05, Sicherungsmodul 1.3.0) - rot, solange ein gespeicherter Wert beim Laden
+     * nicht so gilt, wie er gespeichert ist. Die Tabelle gibt unmaskiert aus: die Saetze kommen maskiert. */
+    $ev_lb = ev_lade_b(true);
+    $ev_la = ev_lade_beanstandungen(null, true);
+    $z[] = ev_pruefzeile($ev_la ? 0 : 1, ev_e(sicherung_t('K_LADE_FRAGE', $ev_lb)),
+        $ev_la ? implode(' ', sicherung_lade_saetze($ev_lb, $ev_la)) : ev_e(sicherung_t('K_LADE_KEINE', $ev_lb)));
 
     /* ---- EVCC selbst ---- */
     if (ev_dienst_vorhanden()) {
@@ -431,6 +437,9 @@ function ev_pruefungen()
     $z[] = ev_pruefzeile($ev_v2s === 2 ? -1 : $ev_v2s, ev_t('TEST.F_V2_HAKEN'), ev_e($ev_v2t));
     list($ev_bok, $ev_btext) = ev_pruef_bruecke();
     $z[] = ev_pruefzeile($ev_bok, ev_t('TEST.F_BRUECKE'), $ev_btext);
+    /* 0.9.66: faellt das Themen-Praefix auf einen gemeinsamen Bereich unter haus/ (Regeln/07)? */
+    $ev_hb = ev_pruef_praefix_haus($cfg);
+    $z[] = ev_pruefzeile($ev_hb[0], ev_t('HAUSBEREICH.F_TEST'), $ev_hb[1]);
 
     /* ---- Token und Steuerung ---- */
     $ev_tok = (string) $cfg['aktionstoken'];

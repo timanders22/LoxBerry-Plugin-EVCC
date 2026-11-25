@@ -40,10 +40,12 @@ define('EV_FAHRZEUGE', 4);
  * mit weiteren Ausgabezielen, ev_mit_zielen(), Welle Mehrfach-Ziele). Liegt neben dieser Datei; die Datei schuetzt sich
  * selbst gegen doppeltes Laden. */
 require_once __DIR__ . '/sprachausgabe.php';
+require_once __DIR__ . '/meldung.php';     // Statusmeldungen an SignalBot (seit 0.9.66)
 /* Gemeinsames Sicherungsmodul (Abschrift von Werkzeuge/gemeinsam/sicherung.php, seit 0.9.59): "Einstellungen
  * sichern" und "Einstellungen zurueckspielen" verhalten sich in allen Plugins des Hauses gleich. Liegt neben
  * dieser Datei und schuetzt sich selbst gegen doppeltes Laden. */
 require_once __DIR__ . '/sicherung.php';
+require_once __DIR__ . '/haus_bereiche.php';     // gemeinsame Bereiche unter haus/ (seit 0.9.66, Regeln/07)
 
 /* ==================================================================
  * Pfade und Protokoll
@@ -450,6 +452,7 @@ function ev_vorgaben()
         'ansage_ausfall'     => 1,
         'ansage_startfehler' => 1,
         'ansage_fertig'      => 1,
+        'meldung'            => meld_vorgaben(ev_meld_haken_vorgabe(), ev_meld_haken_vorgabe()),     // 0.9.66: Meldungen an SignalBot, ab Werk aus
         'tts'               => ansage_werk_block(),     // 0.9.50: nie gesetzt = ab Werk EIN; ein gespeicherter Block bleibt
         'ansage_regeln'     => ansage_regeln_vorgaben(),
         'ansage_token_herkunft' => array(),     // nie in einer Sicherung
@@ -659,9 +662,14 @@ function ev_config($erzeugen = true)
  * Nebendatei + rename() gibt es nur zwei Zustaende: alte Datei oder neue.
  * Ein halb geschriebener Stand kann nicht mehr entstehen.
  */
-function ev_config_write($cfg)
+function ev_config_write($cfg, $lade_behalten = true)
 {
     $p = ev_paths();
+    /* 0.9.66 (Lade-Beanstandungen, Regeln/05, Entscheidung des Hausherrn "Dateiwert behalten"): ein beim Laden
+     * beanstandetes Feld, das der neue Stand nicht geaendert hat, behaelt seinen gespeicherten Wert - auch beim ersten
+     * Token einer Datei ohne Schluessel aktionstoken (ev_config() schrieb dort die normierte Konfiguration). Nicht beim
+     * Zurueckspielen, beim Vervollstaendigen (schreibt Dateiwerte) und beim Knopf "Angezeigte Werte uebernehmen". */
+    if ($lade_behalten && is_array($cfg)) { $cfg = ev_lade_behalten($cfg); }
     @mkdir($p['configdir'], 0775, true);
     $js = json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     // json_encode liefert bei ungueltigem UTF-8 false, und file_put_contents
@@ -701,6 +709,72 @@ function ev_json_leere_objekte($a, $o)
         }
     }
     return $a;
+}
+
+/* ==================================================================
+ * Lade-Beanstandungen (0.9.66; Regeln/05, Sicherungsmodul 1.3.0)
+ *
+ * ev_config() bringt eine von Hand verbogene Datei fuer den Betrieb in ihre Grenzen (Takt, Zahl der Ladepunkte und
+ * Fahrzeuge, Vollversand, Haken, Adresse, MQTT-Praefix). Das bleibt - aber jede solche Ersetzung wird gemeldet
+ * (Reiter Test rot, Seite gelb, einmal ins Protokoll) und nie in die Datei zurueckgeschrieben.
+ * ================================================================== */
+
+/** Die rohen Werte von evcc.json (ohne jede Normierung), null = keine lesbare Datei. Schreibt nichts. */
+function ev_lade_roh()
+{
+    $p = ev_paths();
+    clearstatcache(true, $p['config']);
+    $roh = is_file($p['config']) ? trim((string) @file_get_contents($p['config'])) : '';
+    $d = ($roh !== '' && $roh[0] === '{') ? json_decode($roh, true) : null;
+    return is_array($d) ? $d : null;
+}
+
+/** Die Beschreibung fuer die Lade-Beanstandungen (geheim: 'geheim' der Sicherungsbeschreibung). $maskiert = true:
+ *  diese Seite gibt Meldungen und die Tabelle des Reiters Test unmaskiert aus - alles kommt vormaskiert. */
+function ev_lade_b($maskiert = true)
+{
+    $b = ev_sicherung_beschreibung();
+    /* Die Sprechtoken der Datei (eine Sicherung traegt keine) nimmt das Modul fuer die Pruefung selbst heraus
+     * (sicherung_lade_ohne_geheim(), 1.3.0) - keine eigene Umgehung. */
+    $b['e'] = $maskiert ? 'ev_e' : function ($s) { return (string) $s; };
+    return $b;
+}
+
+/** Die Lade-Beanstandungen: rohe Dateiwerte gegen den verwendeten Stand ($cfg, sonst ev_config(false)). */
+function ev_lade_beanstandungen($cfg = null, $maskiert = true)
+{
+    $d = ev_lade_roh();
+    if ($d === null) { return array(); }
+    return sicherung_lade_beanstandungen(ev_lade_b($maskiert), $d, is_array($cfg) ? $cfg : ev_config(false));
+}
+
+/** Vor dem Schreiben: jedes beanstandete Feld, das $cfg nicht geaendert hat, bekommt seinen Dateiwert zurueck. */
+function ev_lade_behalten(array $cfg)
+{
+    $d = ev_lade_roh();
+    if ($d === null) { return $cfg; }
+    $v = ev_config(false);
+    list($cfg, ) = sicherung_lade_behalten($cfg, $d, $v, sicherung_lade_beanstandungen(ev_lade_b(false), $d, $v));
+    return $cfg;
+}
+
+/** Minutentakt (bin/ev_abruf.php): fehlende Einstellungen eintragen, dann die Lade-Beanstandungen einmal melden.
+ *  Rueckgabe wie ev_config_vervollstaendigen(). */
+function ev_dienst_pflege()
+{
+    $r = ev_config_vervollstaendigen();
+    ev_lade_melden(ev_lade_beanstandungen());     // Kennung D
+    return $r;
+}
+
+/** Einmal je Aenderung ins Protokoll (nur Namen und Gruende, nie Werte). */
+function ev_lade_melden(array $beanst)
+{
+    $d = ev_paths()['datadir'];
+    if ($d === '' || (!is_dir($d) && !@mkdir($d, 0775, true))) { return; }
+    if (sicherung_lade_melden_faellig($beanst, $d . '/lade_beanstandungen.merk')) {
+        ev_log(sicherung_lade_protokollzeile($beanst));
+    }
 }
 
 /**
@@ -754,7 +828,7 @@ function ev_config_vervollstaendigen()
     // Ein leeres Objekt der Datei ({}) bliebe nach json_decode(..., true) ein leeres Feld und kaeme als []
     // zurueck - der Rohwert wird erhalten.
     $datei = ev_json_leere_objekte($datei, json_decode($roh));
-    if (!ev_config_write($datei)) {
+    if (!ev_config_write($datei, false)) {     // 0.9.66: die Dateiwerte - kein "Dateiwert behalten" (Regeln/05)
         ev_log('Konfiguration NICHT vervollstaendigt: evcc.json liess sich nicht schreiben ('
             . count($fehlend) . ' fehlende Schluessel).');
         return array('stand' => 'fehler', 'schluessel' => $fehlend);
@@ -3067,6 +3141,7 @@ function ev_mqtt_publish($werte = null, $voll = false)
     $ev_ohne_stand = !$ev_antwort && (!isset($werte['ts']['wert']) || (int) $werte['ts']['wert'] === 0);
     $ev_nur = array_flip(array('ok', 'ts', 'dienst', 'betriebsbereit', 'fehler_nr', 'letzter_fehler'));
     $ev_praefix = ev_mqtt_thema($cfg['mqtt_topic']);
+    ev_praefix_haus_melden($cfg);   // 0.9.66: Praefix im gemeinsamen Bereich? melden, nicht anhalten
     ev_mqtt_praefix_merken($ev_praefix);
     $ev_felder = ev_felder();
     /* Die Altwerte, die der Broker noch haelt (oder alle, wenn er nicht zu
@@ -4949,6 +5024,7 @@ function ev_wert_pruefen($schluessel, $wert)
         return ansage_regeln_wert($wert, $ev_tg) !== null;
     }
     if ($schluessel === 'ansage_token_herkunft') { return is_array($wert); }
+    if ($schluessel === 'meldung') { return !meld_block_pruefen($wert, ev_meld_anlaesse()); }     // 0.9.66
     /* NICHT getrimmt (C9, seit 0.9.34): ein Wert mit Leerzeichen am Rand wird
      * abgewiesen, nicht zurechtgebogen (Regeln/05, Ergaenzung 24.09.2026).
      * Bis 0.9.33 stand hier trim(), und eine Sicherung mit " http://... "
@@ -5041,6 +5117,11 @@ function ev_sicherung_wert_mangel($k, $w)
     if (!ev_wert_pruefen($k, $w)) {
         return sprintf(ev_t('EINST.SICH_WERT_UNZULAESSIG'), ev_e((string) $k));
     }
+    /* 0.9.66: kein Praefix auf einem gemeinsamen Bereich unter haus/ (Regeln/07) - wie im Formular. */
+    if ($k === 'mqtt_topic' && is_string($w) && hb_bereich($w) !== '') {
+        return sprintf(ev_t('EINST.SICH_WERT_UNZULAESSIG'), ev_e((string) $k)) . ' '
+            . ev_e(sprintf(ev_t('HAUSBEREICH.SICH_W'), hb_bereich($w)));
+    }
     return '';
 }
 
@@ -5127,6 +5208,7 @@ function ev_sicherung_beschreibung()
                 return ansage_wert_pruefen(ansage_sicherung_bereinigen($w), $g, ev_ansage_modi());
             }),
         'ansage_regeln' => sicherung_block(array_keys(ansage_regeln_vorgaben())),
+        'meldung' => meld_sicherung_knoten(ev_meld_anlaesse(), ev_meld_k()),     // 0.9.66
     );
     foreach (ev_sicherung_spaete_schluessel() as $s) {
         if (!isset($schluessel[$s])) { $schluessel[$s] = array(); }
@@ -5146,6 +5228,9 @@ function ev_sicherung_beschreibung()
         'vorgaben' => ev_vorgaben(),
         'schluessel' => $schluessel,
         'nie_aus_datei' => array('ansage_token_herkunft'),
+        /* 0.9.66: nie mit Wert in den Lade-Beanstandungen (Modul 1.3.0) - das EVCC-Passwort und die Sprechtoken;
+         * aktionstoken ist es immer. */
+        'geheim' => array_merge(array('passwort'), array_map(function ($n) { return 'tts.' . $n; }, ansage_geheim())),
         'pruefen' => function ($k, $w) {
             return ev_sicherung_wert_mangel($k, $w);
         },
@@ -5500,6 +5585,8 @@ function ev_ansage_senden($jetzt = null)
         $conf = ev_config(false);
         ev_ansage_token_pflegen($conf);
         $conf = ev_config(false);
+        ev_meld_senden($frisch, $conf);     // 0.9.66: dieselben Anlaesse an SignalBot (eigene Haken)
+        $frisch = ev_meld_nur_ansage($frisch, $conf);     // die Ansage nur mit ihrem eigenen Haken
         $a = ansage_regel_sprechen($frisch, ev_tts($conf), ev_ansage_regeln($conf), ev_ansage_k());
         $erg = $a['regel'] !== '' ? $a['regel'] : 'gesprochen';
         if ($a['r'] !== null) {
@@ -5575,7 +5662,7 @@ function ev_ansage_takt(array $werte, $jetzt = null)
     $jetzt = $jetzt === null ? time() : (int) $jetzt;
     $cfg = ev_config(false);
     $datei = ev_tmpdir() . '/ansage.json';
-    if (!ev_ansage_an($cfg)) {
+    if (!ev_ansage_an($cfg) && !ev_meld_aktiv($cfg)) {     // 0.9.66: auch fuer die Meldung an SignalBot
         /* Aus: nichts sagen, nichts merken - sonst kaeme beim Einschalten ein alter Zustand. */
         if (is_file($datei)) { @unlink($datei); }
         return array(0, 0);
@@ -5648,7 +5735,7 @@ function ev_ansage_takt(array $werte, $jetzt = null)
     $legen = array();
     foreach ($faelle as $f) {
         list($anlass, $schl, $satz) = $f;
-        if (empty($cfg[$anl[$anlass]])) { continue; }    // abgewaehlt
+        if (!ev_meld_will($anlass, $cfg)) { continue; }    // abgewaehlt (Ansage und Meldung an SignalBot, 0.9.66)
         $legen[] = array('schluessel' => $schl, 'text' => $satz);
         $n++;
     }
@@ -7048,4 +7135,158 @@ function ev_bruecke_pruefzeilen()
     bb_pruefen();
     $aus = (string) ob_get_clean();
     return array_values(array_filter(explode("\n", $aus), 'strlen'));
+}
+
+/**
+ * 0.9.66 (Entscheidung des Hausherrn 23.11.2026 "Nur gemeinsame Bereiche", Regeln/07): Zeile im Reiter Test -
+ * faellt das gespeicherte Themen-Praefix auf einen gemeinsamen Bereich unter haus/? Speichern und Zurueckspielen
+ * weisen ein solches Praefix ab; ein schon gespeichertes bleibt in Betrieb und ist hier rot, grau bei ausgeschaltetem MQTT.
+ * Liste und Pruefung aus dem gemeinsamen Modul haus_bereiche.php. Rueckgabe array(stand, html).
+ */
+function ev_pruef_praefix_haus($cfg)
+{
+    $p = ev_mqtt_thema((string) (isset($cfg['mqtt_topic']) ? $cfg['mqtt_topic'] : ''));
+    $b = hb_bereich($p);
+    if ($b !== '') {
+        if (!(!empty($cfg['mqtt_ein']))) {
+            return array(-1, sprintf(ev_t('HAUSBEREICH.A_AUS'), ev_e($p), ev_e($b)));
+        }
+        return array(0, sprintf(ev_t('HAUSBEREICH.A_NEIN'), ev_e($p), ev_e($b)));
+    }
+    return array(1, sprintf(ev_t('HAUSBEREICH.A_JA'), ev_e($p)));
+}
+
+/**
+ * 0.9.66: einmal je Aenderung eine Protokollzeile, solange das Praefix auf einen gemeinsamen Bereich faellt; der
+ * Versand bleibt, wie er ist. Gemerkt in praefix_haus_gemeldet.txt im Datenordner. Rueckgabe der Bereich oder ''.
+ */
+function ev_praefix_haus_melden($cfg, $merk = null)
+{
+    $p = ev_mqtt_thema((string) (isset($cfg['mqtt_topic']) ? $cfg['mqtt_topic'] : ''));
+    if ($merk === null) {
+        $merk = ev_paths()['datadir'] . '/praefix_haus_gemeldet.txt';
+    }
+    $b = hb_melden_faellig($p, $merk);
+    if ($b !== '') {
+        ev_log(hb_logtext($p, $b));
+    }
+    return $b;
+}
+
+if (!function_exists('ev_meld_block')) {
+
+/* ---------------- Statusmeldungen an SignalBot (0.9.66, gemeinsames Modul meldung.php) ----------------
+ *
+ * Auftrag des Hausherrn 23.11.2026, Entscheidungen 23./24.11.2026: dieselben Anlaesse wie die Ansage, eigener Haken je
+ * Anlass, ab Werk aus; Sperre, Bremse und Versand im Modul. Die Erkennung laeuft auch ohne Ausgabeart, wenn eine Meldung
+ * eingeschaltet ist (ev_meld_aktiv()), und legt einen Anlass hin, wenn Ansage ODER Meldung ihn will
+ * (ev_meld_will()); der Sender trennt die Wege wieder (ev_meld_nur_ansage()).
+ */
+
+/** Die meldbaren Anlaesse: Name => Beschriftung (dieselben wie die Ansage). */
+function ev_meld_anlaesse()
+{
+    return array('ausfall' => ev_t('DURCHSAGE.A_AUSFALL'), 'startfehler' => ev_t('DURCHSAGE.A_STARTFEHLER'), 'fertig' => ev_t('DURCHSAGE.A_FERTIG'));
+}
+
+/** Die ab-Werk-Haken der Ansage dieser Linie: so stehen auch die Haken der Meldung, solange der Block nie gespeichert ist. */
+function ev_meld_haken_vorgabe()
+{
+    return array('ausfall' => 1, 'startfehler' => 1, 'fertig' => 1);
+}
+
+/** Ist der Haken dieses Anlasses fuer die ANSAGE gesetzt? */
+function ev_ansage_anlass_sprache($a, $cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $anl = ev_ansage_anlaesse(); return isset($anl[$a]) && is_array($cfg) && !empty($cfg[$anl[$a]]);
+}
+
+/** Der wirksame Block 'meldung' fuer den Betrieb (ungueltig gespeichert gilt als aus und wird im Formular genannt). */
+function ev_meld_block($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    list($b) = meld_block(is_array($cfg) && array_key_exists('meldung', $cfg) ? $cfg['meldung'] : null, ev_meld_anlaesse(), ev_meld_haken_vorgabe());
+    return $b;
+}
+
+/** Die Beanstandungen eines gespeicherten Blocks (leer = gueltig). */
+function ev_meld_bean($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    list(, $f) = meld_block(is_array($cfg) && array_key_exists('meldung', $cfg) ? $cfg['meldung'] : null, ev_meld_anlaesse(), ev_meld_haken_vorgabe());
+    return $f;
+}
+
+/** Ist irgendein Anlass zur Meldung eingeschaltet? Dann laeuft die Erkennung auch ohne Ausgabeart. */
+function ev_meld_aktiv($cfg = null)
+{
+    return meld_irgendein_an(ev_meld_block($cfg));
+}
+
+/** Will die Ansage ODER die Meldung diesen Anlass? */
+function ev_meld_will($a, $cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    return ev_ansage_anlass_sprache($a, $cfg) || meld_anlass_an(ev_meld_block($cfg), (string) $a);
+}
+
+/** Der Kontext des Moduls: Datenordner (data/plugins/<ordner>, daraus der Absender) und Texte - wie bei der Ansage. */
+function ev_meld_k()
+{
+    return ev_ansage_k();
+}
+
+/** Fuer die Ansage nur Eintraege, deren Ansage-Haken gesetzt ist; ein Eintrag ohne bekannten Anlass bleibt wie bisher. */
+function ev_meld_nur_ansage(array $l, $cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $anl = ev_meld_anlaesse();
+    $aus = array();
+    foreach ($l as $e) {
+        if (is_array($e) && array_key_exists(meld_anlass_von($e), $anl) && !ev_ansage_anlass_sprache(meld_anlass_von($e), $cfg)) { continue; }
+        $aus[] = $e;
+    }
+    return $aus;
+}
+
+/** Die Eintraege an SignalBot melden. Protokoll: eine Zeile, wenn gesendet oder gescheitert (nie der Text). */
+function ev_meld_senden(array $l, $cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $b = ev_meld_block($cfg);
+    if (empty($b['ein']) || !$l) { return null; }
+    $a = meld_regel_senden($l, $b, ev_meld_k());
+    if ($a['regel'] === '' || in_array($a['regel'], array('BREMSE', 'STAND', 'ORDNER'), true)) {
+        ev_log(meld_regel_kurz($a));
+    }
+    return $a;
+}
+
+/** Der Knopf "Testmeldung senden": array(angenommen, Satz). Geht an Haken, Sperre und Bremse vorbei. */
+function ev_meld_test()
+{
+    $r = meld_testmeldung(ev_meld_k());
+    ev_log('Testmeldung an SignalBot: ' . ($r[0] ? 'angenommen' : 'nicht angenommen'));
+    return $r;
+}
+
+/** Der Block im Einstellungsformular (unter den Ansage-Regeln, im selben Formular), mit Lage und Knopf. */
+function ev_meld_form_html($cfg = null)
+{
+    if ($cfg === null) { $cfg = ev_config(false); }
+    $e = function ($s) { return htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8'); };
+    $k = ev_meld_k();
+    $o = array();
+    /* 0.9.66: unsichtbarer Doppel des Speicherknopfs VOR dem Knopf Testmeldung - die Eingabetaste in einem Textfeld
+     * loest den ersten Absendeknopf des Formulars aus; sie soll speichern wie bisher, nicht die Testmeldung senden. */
+    $o[] = '<button data-role="none" type="submit" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden"></button>';
+    $o[] = '<h3>' . $e(meld_t('TITEL', $k)) . '</h3>';
+    $o[] = meld_formular_html(ev_meld_block($cfg), ev_meld_anlaesse(), array(), $k);
+    list(, $lage) = meld_pruefzeile(ev_meld_block($cfg), ev_meld_bean($cfg), $k);
+    $o[] = '<div class="sm-hilfe">' . $e(meld_t('F_TEST', $k) . ' ' . $lage) . '</div>';
+    $o[] = '<div class="sm-knopfreihe"><button data-role="none" class="sm-btn sm-b-aktion" type="submit" name="meld_test" value="1">'
+         . $e(meld_t('K_TEST', $k)) . '</button></div>';
+    return implode("\n", $o) . "\n";
+}
 }

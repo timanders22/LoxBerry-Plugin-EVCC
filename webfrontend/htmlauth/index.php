@@ -154,6 +154,12 @@ if ($ev_post && isset($_POST['testaktion'])) {
 
 /* Welle Mehrfach-Ziele (Sprachmodul 1.2.1): die Knoepfe "Testansage an Ziel n" schicken ansage_test_ziel=n - es spricht
  * nur dieses Ziel; der bisherige Knopf spricht an alle Ziele gleichzeitig. Eine unbrauchbare Nummer spricht nichts. */
+/* 0.9.66: Testmeldung an SignalBot (Knopf unter den Ansage-Regeln). */
+if ($ev_post && isset($_POST['meld_test'])) {
+    list($meld_ok, $meld_satz) = ev_meld_test();
+    if ($meld_ok) { $ev_meldungen[] = ev_e($meld_satz); } else { $ev_fehler[] = ev_e($meld_satz); }
+    $ev_tab = 'tab-test';
+}
 if ($ev_post && (isset($_POST['ansage_test']) || isset($_POST['ansage_test_ziel']))) {
     $ev_tk = ev_ansage_k();
     $ev_tnur = (isset($_POST['ansage_test_ziel']) && ev_mit_zielen()) ? ansage_test_ziel($_POST) : 0;
@@ -179,7 +185,7 @@ if ($ev_post && (isset($_POST['ansage_test']) || isset($_POST['ansage_test_ziel'
    Beanstandungen werden GESAMMELT, nicht ueberschrieben: eine einzelne
    Zuweisung verschluckt die vorherigen, und der Benutzer korrigiert dann
    einen Fehler nach dem anderen. */
-if ($ev_post && isset($_POST['speichern'])) {
+if ($ev_post && isset($_POST['speichern']) && !isset($_POST['meld_test'])) {     // 0.9.66: der Knopf Testmeldung (im selben Formular) speichert nicht
     $ev_cfg = ev_config();
 
     $ev_url = trim((string) (isset($_POST['url']) ? $_POST['url'] : ''));
@@ -291,7 +297,9 @@ if ($ev_post && isset($_POST['speichern'])) {
     $ev_thinw = array();     // Welle Mehrfach-Ziele (Sprachmodul 1.2.1): Hinweise des Moduls, die das Speichern nicht verhindern
     $ev_tneu = ansage_formular_lesen($_POST, ev_tts($ev_cfg), $ev_tmangel, $ev_tbean,
                                      array('modi' => ev_ansage_modi(), 'ziele' => ev_mit_zielen(), 'token_vor_ort' => true, 'aus_gewinnt' => true), ev_ansage_k(), $ev_thinw);
-    list($ev_cfg['ansage_regeln']) = ansage_regeln_formular($_POST, ev_ansage_regeln($ev_cfg), array(), $ev_tmangel, $ev_tbean, ev_ansage_k());     // S2: Wann gesprochen wird (Stamm)
+    list($ev_cfg['ansage_regeln']) = ansage_regeln_formular($_POST, ev_ansage_regeln($ev_cfg), array(), $ev_tmangel, $ev_tbean, ev_ansage_k());
+    // 0.9.66: der Block 'Meldungen an SignalBot' (eine Beanstandung haelt das Speichern an, wie die Ansage)
+    $ev_cfg['meldung'] = meld_formular_lesen($_POST, isset($ev_cfg['meldung']) ? $ev_cfg['meldung'] : null, ev_meld_anlaesse(), $ev_tmangel, $ev_tbean, ev_meld_k(), ev_meld_haken_vorgabe());     // S2: Wann gesprochen wird (Stamm)
     // 0.9.53: ein eingetipptes oder geloeschtes Sprechtoken ist nicht mehr vom Nachbarn; bis 0.9.52 ueberschrieb es der naechste Abgleich.
     $ev_cfg['ansage_token_herkunft'] = ansage_token_herkunft_formular($_POST, isset($ev_cfg['ansage_token_herkunft']) ? $ev_cfg['ansage_token_herkunft'] : array());
     foreach ($ev_tmangel as $ev_tm) { $ev_fehler[] = ev_e($ev_tm['text']); }
@@ -348,6 +356,13 @@ if ($ev_post && isset($_POST['save_mqtt'])) {
     $ev_mtopic = (isset($_POST['mqtt_topic']) && is_string($_POST['mqtt_topic'])) ? (string) $_POST['mqtt_topic'] : '';
     if (!ev_wert_pruefen('mqtt_topic', $ev_mtopic)) {
         $ev_fehler[] = ev_t('EINST.FEHLER_TOPIC');
+        $ev_bean[] = 'mqtt_topic';
+    } elseif (hb_bereich($ev_mtopic) !== '' && $ev_mtopic !== (string) $ev_mcfg['mqtt_topic']) {   // nur NEUE Eingaben: ein schon gespeichertes Praefix sperrt das Speichern
+        // des Reiters nicht (Regeln/07; Bauart Einspeisebremse 0.9.25)
+        /* 0.9.66 (Entscheidung des Hausherrn 23.11.2026 "Nur gemeinsame Bereiche", Regeln/07): kein Praefix auf einem
+         * gemeinsamen Bereich unter haus/ - nur hier und beim Zurueckspielen, nicht in der Pruefung beim Lesen der
+         * Konfiguration: ein schon gespeichertes bleibt in Betrieb, der Reiter Test meldet es. */
+        $ev_fehler[] = sprintf(ev_t('HAUSBEREICH.FEHLER'), ev_e($ev_mtopic), ev_e(hb_bereich($ev_mtopic)));
         $ev_bean[] = 'mqtt_topic';
     } else {
         $ev_mcfg['mqtt_topic'] = $ev_mtopic;
@@ -442,7 +457,8 @@ if ($ev_post && isset($_POST['ev_zurueck'])) {
          * Beanstandungen, nicht nur die erste). ev_config_write() schreibt Konfiguration und
          * Zweitschrift; das Modul misst danach, ob die Zweitschrift inhaltsgleich ist. */
         $ev_b = ev_sicherung_beschreibung();
-        $ev_b['speichern'] = function ($neu) { return ev_config_write($neu); };
+        // 0.9.66: die Werte einer Sicherung sind ausdruecklich - kein "Dateiwert behalten" (Regeln/05)
+        $ev_b['speichern'] = function ($neu) { return ev_config_write($neu, false); };
         $ev_b['zweitschrift'] = function () { $p = ev_paths(); return array($p['config'], $p['sicherung']); };
         $ev_b['nachziehen'] = function ($neu, $jetzt, $r) use (&$ev_fehler, &$ev_bruecke_melden) {
             list($h, $f) = ev_sicherung_nachziehen($neu, $jetzt, $r);
@@ -466,6 +482,33 @@ if (!empty($ev_bruecke_melden)) {
     elseif ($ev_bart === 'aus') { $ev_meldungen[] = ev_t('BEFEHL.M_AUS'); }
     elseif ($ev_bart === 'start_fehl') { $ev_fehler[] = sprintf(ev_t('BEFEHL.M_START_FEHL'), ev_e($ev_baus)); }
     elseif ($ev_bart === 'stop_fehl') { $ev_fehler[] = sprintf(ev_t('BEFEHL.M_STOP_FEHL'), ev_e($ev_baus)); }
+}
+
+/* ================= Lade-Beanstandungen: angezeigte Werte uebernehmen (0.9.66) =================
+ * Nur mit gesetztem Haken (Entscheidung des Hausherrn 24.11.2026, "Haken im gelben Kasten"); ohne ihn bleibt die Datei
+ * byte-gleich. Geschrieben ohne "Dateiwert behalten". Der Wachposten oben hat $_POST bei fremdem Merkmal schon
+ * geleert. Die Meldungen dieser Seite werden unmaskiert ausgegeben - hier vormaskiert. Nachzuziehen ist nichts: der
+ * Abruf arbeitete schon mit den verwendeten Werten (Abo-Datei und Bruecke folgen ev_config() im Minutentakt). */
+if ($ev_post && sicherung_lade_eingang($_POST) !== '') {
+    $ev_lb = ev_lade_b(true);
+    if (sicherung_lade_eingang($_POST) !== 'ja') {
+        $ev_fehler[] = ev_e(sicherung_t('K_LADE_HAKEN_FEHLT', $ev_lb));
+    } else {
+        $ev_ld = ev_lade_roh();
+        $ev_lv = ev_config(false);
+        $ev_un = array();
+        if ($ev_ld !== null) {
+            list($ev_lneu, $ev_un) = sicherung_lade_uebernehmen_stand($ev_ld, $ev_lv, sicherung_lade_beanstandungen($ev_lb, $ev_ld, $ev_lv));
+            if ($ev_un && !ev_config_write($ev_lneu, false)) {
+                $ev_fehler[] = sprintf(ev_t('EINST.FEHLER_SPEICHERN'), ev_e(ev_paths()['config']));
+                $ev_un = array();
+            }
+        }
+        if ($ev_un) {
+            ev_log('Lade-Beanstandungen: angezeigte Werte uebernommen: ' . implode(', ', array_map('sicherung_name', $ev_un)));
+            $ev_meldungen[] = sprintf(ev_e(sicherung_t('K_LADE_UEBERNOMMEN', $ev_lb)), ev_e(implode(', ', $ev_un)));
+        }
+    }
 }
 
 /* ================= JEDER POST ENDET MIT EINER UMLEITUNG (O1, seit 0.9.34) =================
@@ -614,6 +657,9 @@ if (class_exists('LBWeb', false)) {
 <?php foreach ($ev_fehler as $ev_f) { ?><li><?= $ev_f ?></li><?php } ?>
 </ul></div>
 <?php } ?>
+<?php /* 0.9.66: Lade-Beanstandungen (Regeln/05) - gelber Kasten im Reiter Einstellungen; einmal je Aenderung ins Protokoll. */
+$ev_lade = ev_lade_beanstandungen();
+ev_lade_melden($ev_lade); ?>
 
 <?php
 /* Kopf (Entscheidung Nr. 43, seit 0.9.40): Statusuebersicht ueber den
@@ -675,6 +721,8 @@ $ev_lp_da = isset($ev_stand['roh']['loadpoints']) && is_array($ev_stand['roh']['
 <div class="sm-seite<?= $ev_tab === 'tab-settings' ? ' sm-active' : '' ?>" id="tab-settings">
 
 <div class="sm-hinweis"><?= ev_t('EINST.WAS_IST_DAS') ?></div>
+<?= sicherung_lade_kasten(ev_lade_b(true), isset($ev_lade) ? $ev_lade : ev_lade_beanstandungen(),
+        ev_fmt() . '<input data-role="none" type="hidden" name="activetab" value="tab-settings">') ?>
 
 <?php if ($ev_tokneu !== null) { ?>
 <div class="sm-warnung"><?= sprintf(ev_t('EINST.TOKEN_NEU'), ev_e(date('d.m.Y H:i', $ev_tokneu[0])), ev_e($ev_tokneu[1])) ?></div>
@@ -861,6 +909,7 @@ if ($ev_link !== $ev_cfg['url']) { ?>
     'm' => function ($n) { return ev_markierung('speichern', ev_ziele_x2_name($n)); },
     'c' => function ($n, $g) { return !empty(ev_eingabe('speichern', $n, $g)); },
     'token_vor_ort' => true), ev_ansage_k()) ?>
+<?= ev_meld_form_html($ev_cfg) ?>
 
 <h2><?= ev_e(ev_t('EINST.H_UPDATE')) ?></h2>
 <div class="sm-warnung"><?= ev_t('EINST.H_UPDATE_TEXT') ?></div>
