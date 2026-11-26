@@ -6,6 +6,15 @@
 # sudo-Regel gibt es an dieser Stelle also bei einer Erstinstallation noch
 # nicht. Ob es ein Update ist, sagt die Marke <ordner>.upgrade_laeuft.
 # Argumente: <ZUFALLSKENNUNG> <NAME> <FOLDER> <VERSION> <BASEFOLDER> <TEMPFOLDER>
+# [upgrade_daten] Gemeinsamer Baustein (Werkzeuge/gemeinsam/upgrade_daten.sh): vor allem anderen den Datenordner
+# [upgrade_daten] aus der Sicherung von preupgrade.sh zurueckspielen, ohne eine Datei der neuen Installation zu
+# [upgrade_daten] ueberschreiben. Ohne Sicherung (Neuinstallation) geschieht still nichts.
+if [ -f "$(dirname "$0")/upgrade_daten.sh" ] && . "$(dirname "$0")/upgrade_daten.sh"; then
+    upgrade_daten_zurueck "$3" "$5" "$(dirname "$0")" || :
+else
+    echo "<WARNING> Der Baustein upgrade_daten.sh fehlt neben $(basename "$0") - der Datenordner wurde nicht zurueckgespielt."
+fi
+
 ARGV3=$3   # Pluginordner
 ARGV5=$5   # LoxBerry-Basisordner
 PDIR="${ARGV3:-evcc}"
